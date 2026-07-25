@@ -1,0 +1,27 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:///./flowmind.db
+      - LLM_MODE=cloud
+      - CLOUD_PROVIDER=huggingface
+      - HF_TOKEN=${HF_TOKEN}
+      - HF_MODEL=${HF_MODEL:-Qwen/Qwen2.5-1.5B-Instruct}
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+      - 1.1.1.1
+    volumes:
+      - backend_data:/app/data
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  backend_data:
