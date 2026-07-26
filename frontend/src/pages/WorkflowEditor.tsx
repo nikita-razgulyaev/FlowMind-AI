@@ -58,6 +58,7 @@ function defaultConfig(type: string): Record<string, any> {
                 model: "qwen2.5",
                 mode: "local",
                 max_iterations: 5,
+                temperature: 0.3,
                 prompt: "{input}",
             };
         case "condition":
@@ -105,6 +106,9 @@ export default function WorkflowEditor() {
     const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
+    const [showRunDialog, setShowRunDialog] = useState(false);
+    const [runInput, setRunInput] = useState("");
+    const [runStatus, setRunStatus] = useState<string | null>(null);
     const idCounter = useRef(0);
 
     useEffect(() => {
@@ -225,9 +229,20 @@ export default function WorkflowEditor() {
             alert("Сохрани workflow перед запуском");
             return;
         }
-        const { data, error } = await api.executeWorkflow(Number(id));
-        if (data) alert(`Запущено! Execution ID: ${data.execution_id}`);
-        if (error) alert(`Error: ${error}`);
+        setShowRunDialog(true);
+    };
+
+    const confirmExecute = async () => {
+        setShowRunDialog(false);
+        setRunStatus("Выполняется...");
+        const { data, error } = await api.executeWorkflow(Number(id), {
+            input: runInput,
+        });
+        if (data)
+            setRunStatus(
+                `Готово — execution #${data.execution_id} (${data.status})`,
+            );
+        if (error) setRunStatus(`Ошибка: ${error}`);
     };
 
     return (
@@ -247,7 +262,12 @@ export default function WorkflowEditor() {
                         className="text-sm text-gray-400 border-none outline-none focus:ring-0 bg-transparent w-64"
                     />
                 </div>
-                <div className="flex gap-2">
+                <div className="flex items-center gap-3">
+                    {runStatus && (
+                        <span className="text-xs text-gray-500 bg-gray-100 px-2.5 py-1 rounded-full">
+                            {runStatus}
+                        </span>
+                    )}
                     <button
                         onClick={handleExecute}
                         disabled={!isEditing}
@@ -330,6 +350,42 @@ export default function WorkflowEditor() {
                     />
                 )}
             </div>
+
+            {showRunDialog && (
+                <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-5">
+                        <h3 className="text-sm font-semibold text-gray-800 mb-1">
+                            Тестовый запуск
+                        </h3>
+                        <p className="text-xs text-gray-400 mb-3">
+                            Это значение попадёт в {"{input}"} — например,
+                            вопрос пользователя.
+                        </p>
+                        <textarea
+                            autoFocus
+                            value={runInput}
+                            onChange={(e) => setRunInput(e.target.value)}
+                            rows={3}
+                            placeholder="Где мой заказ 5?"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                        <div className="flex justify-end gap-2 mt-4">
+                            <button
+                                onClick={() => setShowRunDialog(false)}
+                                className="px-3 py-1.5 text-sm text-gray-500 hover:bg-gray-50 rounded-lg"
+                            >
+                                Отмена
+                            </button>
+                            <button
+                                onClick={confirmExecute}
+                                className="px-4 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium"
+                            >
+                                Запустить
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

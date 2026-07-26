@@ -343,6 +343,25 @@ export default function NodeConfigPanel({
                                 className="w-full"
                             />
                         </div>
+                        <div>
+                            <label className={label}>
+                                Temperature: {cfg.temperature ?? 0.3} (ниже —
+                                стабильнее tool calling)
+                            </label>
+                            <input
+                                type="range"
+                                min={0}
+                                max={1}
+                                step={0.1}
+                                value={cfg.temperature ?? 0.3}
+                                onChange={(e) =>
+                                    set({
+                                        temperature: parseFloat(e.target.value),
+                                    })
+                                }
+                                className="w-full"
+                            />
+                        </div>
                         <p className="text-xs text-gray-400">
                             Инструменты подключаются связью с нижнего разъёма (↓
                             инструменты) к HTTP-ноде на canvas.

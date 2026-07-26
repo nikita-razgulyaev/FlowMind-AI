@@ -153,7 +153,14 @@ class WorkflowEngine:
         return [self.nodes_by_id[nid] for nid in visited]
 
     async def execute(self, trigger_data=None):
-        self.context["input"] = trigger_data or {}  # ← input для подстановки в шаблоны
+        trigger_data = trigger_data or {}
+        # Если trigger_data — словарь вида {"input": "..."}, подставляем в шаблоны
+        # чистое значение, а не весь словарь целиком (иначе {input} превращается
+        # в "{'input': '...'}", что сбивает модель с толку).
+        if isinstance(trigger_data, dict) and "input" in trigger_data:
+            self.context["input"] = trigger_data["input"]
+        else:
+            self.context["input"] = trigger_data
 
         # Ноды, привязанные к какому-либо agent-у как инструмент, не выполняются
         # в обычном последовательном проходе — их вызывает сам агент по необходимости.
@@ -251,6 +258,7 @@ class WorkflowEngine:
         model = config.get("model", "qwen2.5")
         mode = config.get("mode", "local")
         max_iterations = config.get("max_iterations", 5)
+        temperature = config.get("temperature", 0.3)  # ниже, чем у обычной llm-ноды — стабильнее tool calling
 
         # Инструменты определяются рёбрами графа (agent --tool--> node),
         # плюс поддержка старого формата config.tools для обратной совместимости.
@@ -291,7 +299,7 @@ class WorkflowEngine:
 
         try:
             for _ in range(max_iterations):
-                message = await self.llm.chat(messages, model=model, tools=tool_schemas or None, mode=mode)
+                message = await self.llm.chat(messages, model=model, tools=tool_schemas or None, temperature=temperature, mode=mode)
                 messages.append(message)
                 trace.append(message)
 
