@@ -6,12 +6,14 @@ class WorkflowNode(BaseModel):
     id: str
     type: str
     config: Dict[str, Any] = {}
+    position: Optional[Dict[str, float]] = None
 
 class WorkflowEdge(BaseModel):
     id: str
     from_node: str
     to_node: str
     condition: Optional[str] = None
+    type: Optional[str] = "next"  # "next" (обычный порядок) | "tool" (доступен агенту как инструмент)
 
 class WorkflowCreate(BaseModel):
     name: str

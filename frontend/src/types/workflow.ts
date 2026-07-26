@@ -7,16 +7,19 @@ export interface WorkflowNode {
         | "http"
         | "condition"
         | "print"
+        | "agent"
         | "file_read"
         | "file_write";
     config: Record<string, any>;
+    position?: { x: number; y: number } | null;
 }
 
 export interface WorkflowEdge {
     id: string;
-    from_node: string;  // ← проверь
-    to_node: string;      // ← проверь
+    from_node: string;
+    to_node: string;
     condition?: string;
+    type?: "next" | "tool";
 }
 
 export interface Workflow {

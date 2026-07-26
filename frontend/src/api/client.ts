@@ -25,9 +25,9 @@ class ApiClient {
         if (!response.ok) {
             // Извлекаем сообщение об ошибке
             let errorMsg = "Unknown error";
-            if (typeof data.detail === 'string') {
+            if (typeof data.detail === "string") {
                 errorMsg = data.detail;
-            } else if (typeof data.error === 'string') {
+            } else if (typeof data.error === "string") {
                 errorMsg = data.error;
             } else if (data.detail) {
                 errorMsg = JSON.stringify(data.detail);
@@ -57,6 +57,16 @@ class ApiClient {
         });
     }
 
+    async updateWorkflow(
+        id: number,
+        workflow: Omit<Workflow, "id" | "created_at">,
+    ): Promise<ApiResponse<Workflow>> {
+        return this.request(`/workflows/${id}`, {
+            method: "PUT",
+            body: JSON.stringify(workflow),
+        });
+    }
+
     async executeWorkflow(
         id: number,
         triggerData?: Record<string, any>,
@@ -75,9 +85,7 @@ class ApiClient {
         });
     }
 
-    async getExecutions(
-        workflowId?: number,
-    ): Promise<ApiResponse<any[]>> {
+    async getExecutions(workflowId?: number): Promise<ApiResponse<any[]>> {
         const query = workflowId ? `?workflow_id=${workflowId}` : "";
         return this.request(`/executions/${query}`);
     }

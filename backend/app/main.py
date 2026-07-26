@@ -1,5 +1,8 @@
 import traceback
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,6 +46,23 @@ async def create_workflow(data: WorkflowCreate, db: AsyncSession = Depends(get_d
         is_active=data.is_active
     )
     db.add(workflow)
+    await db.commit()
+    await db.refresh(workflow)
+    return workflow
+
+@app.put("/workflows/{workflow_id}", response_model=WorkflowResponse)
+async def update_workflow(workflow_id: int, data: WorkflowCreate, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Workflow).where(Workflow.id == workflow_id))
+    workflow = result.scalar_one_or_none()
+    if not workflow:
+        raise HTTPException(404, "Workflow not found")
+
+    workflow.name = data.name
+    workflow.description = data.description
+    workflow.nodes = [n.model_dump() for n in data.nodes]
+    workflow.edges = [e.model_dump() for e in data.edges]
+    workflow.is_active = data.is_active
+
     await db.commit()
     await db.refresh(workflow)
     return workflow
