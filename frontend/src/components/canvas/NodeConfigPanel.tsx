@@ -1,5 +1,7 @@
+import { useEffect, useState } from "react";
 import { X, Trash2 } from "lucide-react";
-import type { WorkflowNode } from "../../types/workflow";
+import type { WorkflowNode, Connection } from "../../types/workflow";
+import { api } from "../../api/client";
 import { NODE_META } from "./CanvasNode";
 
 const LLM_MODELS = {
@@ -14,7 +16,7 @@ const LLM_MODELS = {
             label: "Qwen 1.5B (Hugging Face)",
         },
         { value: "Qwen/Qwen2.5-7B-Instruct", label: "Qwen 7B (Hugging Face)" },
-        { value: "google/gemma-2-2b-it", label: "Gemma 2B (Hugging Face)" },
+        { value: "gpt-4o-mini", label: "GPT-4o mini (OpenAI-совместимый)" },
     ],
 };
 
@@ -29,6 +31,59 @@ interface Props {
     onClose: () => void;
 }
 
+function ToolSettingsFields({
+    cfg,
+    set,
+    defaultProps,
+}: {
+    cfg: Record<string, any>;
+    set: (patch: Record<string, any>) => void;
+    defaultProps: Record<string, any>;
+}) {
+    return (
+        <div className="pt-2 border-t border-gray-100">
+            <p className="text-xs font-medium text-gray-500 mb-2">
+                Настройки инструмента (если нода подключена к агенту)
+            </p>
+            <label className={label}>Tool name</label>
+            <input
+                value={cfg.tool_name || ""}
+                onChange={(e) => set({ tool_name: e.target.value })}
+                placeholder="get_order_status"
+                className={`${input} mb-2`}
+            />
+            <label className={label}>Tool description (для модели)</label>
+            <input
+                value={cfg.tool_description || ""}
+                onChange={(e) => set({ tool_description: e.target.value })}
+                placeholder="Получить статус заказа по ID"
+                className={`${input} mb-2`}
+            />
+            <label className={label}>Parameters schema (JSON)</label>
+            <textarea
+                value={
+                    typeof cfg.tool_parameters === "string"
+                        ? cfg.tool_parameters
+                        : JSON.stringify(
+                              cfg.tool_parameters ?? defaultProps,
+                              null,
+                              2,
+                          )
+                }
+                onChange={(e) => {
+                    try {
+                        set({ tool_parameters: JSON.parse(e.target.value) });
+                    } catch {
+                        set({ tool_parameters: e.target.value });
+                    }
+                }}
+                rows={6}
+                className={input}
+            />
+        </div>
+    );
+}
+
 export default function NodeConfigPanel({
     node,
     onChange,
@@ -38,6 +93,22 @@ export default function NodeConfigPanel({
     const meta = NODE_META[node.type] ?? NODE_META.print;
     const cfg = node.config || {};
     const set = (patch: Record<string, any>) => onChange({ ...cfg, ...patch });
+
+    const [connections, setConnections] = useState<Connection[]>([]);
+
+    useEffect(() => {
+        api.getConnections().then(({ data }) => {
+            if (data) setConnections(data);
+        });
+    }, []);
+
+    const aiConnections = connections.filter((c) => c.category === "ai_api");
+    const openaiConnections = aiConnections.filter(
+        (c) => c.provider === "openai_compatible",
+    );
+    const telegramConnections = connections.filter(
+        (c) => c.category === "tool" && c.provider === "telegram_bot",
+    );
 
     return (
         <div className="w-96 shrink-0 bg-white border-l border-gray-200 h-full overflow-y-auto">
@@ -85,12 +156,39 @@ export default function NodeConfigPanel({
                                             : "bg-gray-100 text-gray-600"
                                     }`}
                                 >
-                                    {m === "local"
-                                        ? "Local (Ollama)"
-                                        : "Cloud (HF)"}
+                                    {m === "local" ? "Local (Ollama)" : "Cloud"}
                                 </button>
                             ))}
                         </div>
+
+                        {cfg.mode === "cloud" && (
+                            <div>
+                                <label className={label}>
+                                    Подключение (Connections → AI API)
+                                </label>
+                                <select
+                                    value={cfg.connection_id ?? ""}
+                                    onChange={(e) =>
+                                        set({
+                                            connection_id: e.target.value
+                                                ? Number(e.target.value)
+                                                : undefined,
+                                        })
+                                    }
+                                    className={input}
+                                >
+                                    <option value="">
+                                        — без подключения (через .env) —
+                                    </option>
+                                    {aiConnections.map((c) => (
+                                        <option key={c.id} value={c.id}>
+                                            {c.name} ({c.provider})
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
+
                         <div>
                             <label className={label}>Model</label>
                             <select
@@ -167,71 +265,101 @@ export default function NodeConfigPanel({
                                 className={input}
                             />
                         </div>
-                        <div className="pt-2 border-t border-gray-100">
-                            <p className="text-xs font-medium text-gray-500 mb-2">
-                                Настройки инструмента (если нода подключена к
-                                агенту)
-                            </p>
-                            <label className={label}>Tool name</label>
-                            <input
-                                value={cfg.tool_name || ""}
-                                onChange={(e) =>
-                                    set({ tool_name: e.target.value })
-                                }
-                                placeholder="get_order_status"
-                                className={`${input} mb-2`}
-                            />
+                        <ToolSettingsFields
+                            cfg={cfg}
+                            set={set}
+                            defaultProps={{
+                                type: "object",
+                                properties: {
+                                    order_id: {
+                                        type: "string",
+                                        description: "ID заказа",
+                                    },
+                                },
+                                required: ["order_id"],
+                            }}
+                        />
+                    </>
+                )}
+
+                {node.type === "telegram_send" && (
+                    <>
+                        <div>
                             <label className={label}>
-                                Tool description (для модели)
+                                Подключение (Connections → Инструменты →
+                                Telegram Bot)
+                            </label>
+                            <select
+                                value={cfg.connection_id ?? ""}
+                                onChange={(e) =>
+                                    set({
+                                        connection_id: e.target.value
+                                            ? Number(e.target.value)
+                                            : undefined,
+                                    })
+                                }
+                                className={input}
+                            >
+                                <option value="">— выбери подключение —</option>
+                                {telegramConnections.map((c) => (
+                                    <option key={c.id} value={c.id}>
+                                        {c.name}
+                                    </option>
+                                ))}
+                            </select>
+                            {telegramConnections.length === 0 && (
+                                <p className="text-xs text-amber-600 mt-1">
+                                    Нет подключений Telegram Bot — добавь на
+                                    странице Подключения
+                                </p>
+                            )}
+                        </div>
+                        <div>
+                            <label className={label}>
+                                Chat ID (можно с {"{param}"})
                             </label>
                             <input
-                                value={cfg.tool_description || ""}
+                                value={cfg.chat_id || ""}
                                 onChange={(e) =>
-                                    set({ tool_description: e.target.value })
+                                    set({ chat_id: e.target.value })
                                 }
-                                placeholder="Получить статус заказа по ID"
-                                className={`${input} mb-2`}
-                            />
-                            <label className={label}>
-                                Parameters schema (JSON)
-                            </label>
-                            <textarea
-                                value={
-                                    typeof cfg.tool_parameters === "string"
-                                        ? cfg.tool_parameters
-                                        : JSON.stringify(
-                                              cfg.tool_parameters ?? {
-                                                  type: "object",
-                                                  properties: {
-                                                      order_id: {
-                                                          type: "string",
-                                                          description:
-                                                              "ID заказа",
-                                                      },
-                                                  },
-                                                  required: ["order_id"],
-                                              },
-                                              null,
-                                              2,
-                                          )
-                                }
-                                onChange={(e) => {
-                                    try {
-                                        set({
-                                            tool_parameters: JSON.parse(
-                                                e.target.value,
-                                            ),
-                                        });
-                                    } catch {
-                                        set({
-                                            tool_parameters: e.target.value,
-                                        });
-                                    }
-                                }}
-                                rows={6}
+                                placeholder="123456789"
                                 className={input}
                             />
                         </div>
+                        <div>
+                            <label className={label}>
+                                Сообщение (используй {"{node_id}"} для
+                                переменных)
+                            </label>
+                            <textarea
+                                value={cfg.message || ""}
+                                onChange={(e) =>
+                                    set({ message: e.target.value })
+                                }
+                                rows={3}
+                                placeholder="Здравствуйте, {input}!"
+                                className={input}
+                            />
+                        </div>
+                        <ToolSettingsFields
+                            cfg={cfg}
+                            set={set}
+                            defaultProps={{
+                                type: "object",
+                                properties: {
+                                    chat_id: {
+                                        type: "string",
+                                        description: "ID чата",
+                                    },
+                                    message: {
+                                        type: "string",
+                                        description: "Текст сообщения",
+                                    },
+                                },
+                                required: ["chat_id", "message"],
+                            }}
+                        />
                     </>
                 )}
 
@@ -272,30 +400,62 @@ export default function NodeConfigPanel({
                                 <button
                                     key={m}
                                     onClick={() => set({ mode: m })}
-                                    disabled={m === "cloud"}
-                                    title={
-                                        m === "cloud"
-                                            ? "Пока поддерживается только local (Ollama)"
-                                            : undefined
-                                    }
-                                    className={`flex-1 py-1.5 rounded-lg text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed ${
+                                    className={`flex-1 py-1.5 rounded-lg text-xs font-medium ${
                                         (cfg.mode || "local") === m
                                             ? "bg-indigo-600 text-white"
                                             : "bg-gray-100 text-gray-600"
                                     }`}
                                 >
-                                    {m === "local"
-                                        ? "Local (Ollama)"
-                                        : "Cloud (пока нет)"}
+                                    {m === "local" ? "Local (Ollama)" : "Cloud"}
                                 </button>
                             ))}
                         </div>
+
+                        {cfg.mode === "cloud" && (
+                            <div>
+                                <label className={label}>
+                                    Подключение (только openai-совместимые —
+                                    нужны для tool calling)
+                                </label>
+                                <select
+                                    value={cfg.connection_id ?? ""}
+                                    onChange={(e) =>
+                                        set({
+                                            connection_id: e.target.value
+                                                ? Number(e.target.value)
+                                                : undefined,
+                                        })
+                                    }
+                                    className={input}
+                                >
+                                    <option value="">
+                                        — выбери подключение —
+                                    </option>
+                                    {openaiConnections.map((c) => (
+                                        <option key={c.id} value={c.id}>
+                                            {c.name}
+                                        </option>
+                                    ))}
+                                </select>
+                                {openaiConnections.length === 0 && (
+                                    <p className="text-xs text-amber-600 mt-1">
+                                        Нет подключений типа openai_compatible —
+                                        добавь на странице Подключения
+                                    </p>
+                                )}
+                            </div>
+                        )}
+
                         <div>
                             <label className={label}>Model</label>
                             <input
                                 value={cfg.model || "qwen2.5"}
                                 onChange={(e) => set({ model: e.target.value })}
-                                placeholder="qwen2.5"
+                                placeholder={
+                                    cfg.mode === "cloud"
+                                        ? "gpt-4o-mini"
+                                        : "qwen2.5"
+                                }
                                 className={input}
                             />
                         </div>
@@ -364,7 +524,7 @@ export default function NodeConfigPanel({
                         </div>
                         <p className="text-xs text-gray-400">
                             Инструменты подключаются связью с нижнего разъёма (↓
-                            инструменты) к HTTP-ноде на canvas.
+                            инструменты) к HTTP или Telegram-ноде на canvas.
                         </p>
                     </>
                 )}

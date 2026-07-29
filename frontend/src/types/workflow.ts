@@ -8,6 +8,7 @@ export interface WorkflowNode {
         | "condition"
         | "print"
         | "agent"
+        | "telegram_send"
         | "file_read"
         | "file_write";
     config: Record<string, any>;
@@ -56,4 +57,13 @@ export interface Template {
     description: string;
     nodes: WorkflowNode[];
     edges: WorkflowEdge[];
+}
+
+export interface Connection {
+    id: number;
+    category: "ai_api" | "tool";
+    provider: string;
+    name: string;
+    config: Record<string, any>;
+    created_at: string;
 }

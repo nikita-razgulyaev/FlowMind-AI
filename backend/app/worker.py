@@ -7,23 +7,49 @@ import os
 class LLMProvider:
     """Выбирает LLM-провайдер в зависимости от настроек узла"""
 
-    def __init__(self):
+    def __init__(self, connections: dict = None):
         self.mode = os.getenv("LLM_MODE", "local")
         self.ollama_url = os.getenv("OLLAMA_URL", "http://ollama:11434")
         self.ollama_model = os.getenv("OLLAMA_MODEL", "qwen2.5")
         self.hf_token = os.getenv("HF_TOKEN")
         self.hf_model = os.getenv("HF_MODEL", "Qwen/Qwen2.5-1.5B-Instruct")
         self.cloud_provider = os.getenv("CLOUD_PROVIDER", "huggingface")
+        # connection_id -> {"provider": ..., "config": {...}} — реальные (не замаскированные)
+        # данные подключений, подгружаются из БД в main.py перед выполнением workflow.
+        self.connections = connections or {}
 
-    async def generate(self, prompt: str, model: str = None, temperature: float = 0.7, mode: str = None) -> str:
+    def _resolve_connection(self, connection_id):
+        if connection_id is None:
+            return None
+        return self.connections.get(connection_id)
+
+    async def generate(self, prompt: str, model: str = None, temperature: float = 0.7,
+                        mode: str = None, connection_id=None) -> str:
         effective_mode = mode or self.mode
 
         if effective_mode == "local":
             return await self._ollama_generate(prompt, model or self.ollama_model, temperature)
         elif effective_mode == "cloud":
+            connection = self._resolve_connection(connection_id)
+            if connection:
+                return await self._cloud_generate_via_connection(prompt, model, temperature, connection)
+            # Обратная совместимость: старый путь через .env (HF_TOKEN)
             return await self._cloud_generate(prompt, model or self.hf_model, temperature)
         else:
             raise ValueError(f"Unknown LLM_MODE: {effective_mode}")
+
+    async def _cloud_generate_via_connection(self, prompt: str, model: str, temperature: float, connection: dict) -> str:
+        provider = connection["provider"]
+        cfg = connection["config"]
+        if provider == "huggingface":
+            return await self._hf_generate(prompt, model or self.hf_model, temperature, api_key=cfg.get("api_key"))
+        elif provider == "openai_compatible":
+            return await self._openai_generate(
+                prompt, model, temperature,
+                api_key=cfg.get("api_key"), base_url=cfg.get("base_url", "https://api.openai.com/v1"),
+            )
+        else:
+            raise ValueError(f"Подключение с provider='{provider}' не поддерживает генерацию текста")
 
     async def _cloud_generate(self, prompt: str, model: str, temperature: float) -> str:
         if self.cloud_provider == "huggingface":
@@ -45,14 +71,15 @@ class LLMProvider:
             data = response.json()
             return data.get("response", "")
 
-    async def _hf_generate(self, prompt: str, model: str, temperature: float) -> str:
-        if not self.hf_token:
-            raise ValueError("HF_TOKEN not set")
+    async def _hf_generate(self, prompt: str, model: str, temperature: float, api_key: str = None) -> str:
+        token = api_key or self.hf_token
+        if not token:
+            raise ValueError("HF_TOKEN not set (ни в .env, ни в подключении)")
 
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
                 f"https://api-inference.huggingface.co/models/{model}",
-                headers={"Authorization": f"Bearer {self.hf_token}"},
+                headers={"Authorization": f"Bearer {token}"},
                 json={
                     "inputs": prompt,
                     "parameters": {
@@ -66,7 +93,7 @@ class LLMProvider:
             if response.status_code == 503:
                 print("Model loading, waiting 20s...")
                 await asyncio.sleep(20)
-                return await self._hf_generate(prompt, model, temperature)
+                return await self._hf_generate(prompt, model, temperature, api_key=api_key)
 
             data = response.json()
             if isinstance(data, list) and len(data) > 0:
@@ -74,17 +101,51 @@ class LLMProvider:
 
             return str(data)
 
-    async def chat(self, messages: list, model: str = None, tools: list = None, temperature: float = 0.7, mode: str = None) -> dict:
-        """Чат-эндпоинт с поддержкой tool calling. Пока только для local (Ollama)."""
+    async def _openai_generate(self, prompt: str, model: str, temperature: float, api_key: str, base_url: str) -> str:
+        if not api_key:
+            raise ValueError("У подключения не задан API Key")
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(
+                f"{base_url.rstrip('/')}/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": temperature,
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data["choices"][0]["message"].get("content", "")
+
+    async def chat(self, messages: list, model: str = None, tools: list = None, temperature: float = 0.7,
+                    mode: str = None, connection_id=None) -> dict:
+        """Чат-эндпоинт с поддержкой tool calling: local (Ollama) или cloud через openai-совместимое подключение."""
         effective_mode = mode or self.mode
 
         if effective_mode == "local":
             return await self._ollama_chat(messages, model or self.ollama_model, tools, temperature)
-        else:
-            raise ValueError(
-                f"Agent-нода пока поддерживает tool calling только в mode='local' (Ollama). "
-                f"Получен mode='{effective_mode}'."
+
+        if effective_mode == "cloud":
+            connection = self._resolve_connection(connection_id)
+            if not connection:
+                raise ValueError(
+                    "Agent-нода в mode='cloud' требует connection_id, указывающий на подключение "
+                    "с провайдером 'openai_compatible' (только он поддерживает tool calling в облаке)."
+                )
+            if connection["provider"] != "openai_compatible":
+                raise ValueError(
+                    f"Подключение с provider='{connection['provider']}' не поддерживает tool calling. "
+                    f"Используй подключение с provider='openai_compatible' (OpenAI/OpenRouter/Groq)."
+                )
+            cfg = connection["config"]
+            return await self._openai_chat(
+                messages, model, tools, temperature,
+                api_key=cfg.get("api_key"), base_url=cfg.get("base_url", "https://api.openai.com/v1"),
             )
+
+        raise ValueError(f"Unknown mode: {effective_mode}")
 
     async def _ollama_chat(self, messages: list, model: str, tools: list, temperature: float) -> dict:
         async with httpx.AsyncClient(timeout=120.0) as client:
@@ -102,17 +163,57 @@ class LLMProvider:
             data = response.json()
             return data.get("message", {})
 
+    async def _openai_chat(self, messages: list, model: str, tools: list, temperature: float,
+                            api_key: str, base_url: str) -> dict:
+        if not api_key:
+            raise ValueError("У подключения не задан API Key")
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            payload = {"model": model, "messages": messages, "temperature": temperature}
+            if tools:
+                payload["tools"] = tools
+
+            response = await client.post(
+                f"{base_url.rstrip('/')}/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json=payload,
+            )
+            response.raise_for_status()
+            data = response.json()
+            message = data["choices"][0]["message"]
+
+            # OpenAI отдаёт tool_calls[].function.arguments строкой JSON —
+            # приводим к тому же формату (dict), который уже понимает agent-loop
+            # после ответа Ollama, чтобы не дублировать логику ниже.
+            for call in message.get("tool_calls") or []:
+                fn = call.get("function", {})
+                args = fn.get("arguments")
+                if isinstance(args, str):
+                    try:
+                        fn["arguments"] = json.loads(args)
+                    except json.JSONDecodeError:
+                        fn["arguments"] = {}
+
+            return message
+
 
 class WorkflowEngine:
-    def __init__(self, workflow, execution_id):
+    def __init__(self, workflow, execution_id, connections: dict = None):
         self.workflow = workflow
         self.execution_id = execution_id
         self.context = {}
         self.logs = []
-        self.llm = LLMProvider()
+        # connection_id -> {"provider": ..., "config": {...}}
+        self.connections = connections or {}
+        self.llm = LLMProvider(connections=self.connections)
         # Быстрый доступ к нодам по id — нужен агенту для поиска tool-нод
         self.nodes_by_id = {n["id"]: n for n in workflow.get("nodes", [])}
         self._current_agent_id = None
+
+    def _get_connection(self, connection_id):
+        if connection_id is None:
+            return None
+        return self.connections.get(connection_id)
 
     def _topological_order(self):
         """
@@ -186,7 +287,9 @@ class WorkflowEngine:
             })
         return self.context
 
-    async def _execute_node(self, node, trigger_data):
+    def _get_handler(self, node_type):
+        """Единая точка сопоставления типа ноды с её обработчиком — используется
+        и обычным исполнением графа, и агентом при вызове ноды как инструмента."""
         handlers = {
             "manual": self._handle_manual,
             "llm": self._handle_llm,
@@ -194,24 +297,29 @@ class WorkflowEngine:
             "condition": self._handle_condition,
             "print": self._handle_print,
             "agent": self._handle_agent,
+            "telegram_send": self._handle_telegram_send,
         }
-        handler = handlers.get(node["type"])
+        return handlers.get(node_type)
+
+    async def _execute_node(self, node, trigger_data):
+        handler = self._get_handler(node["type"])
         if not handler:
             return f"Unknown node type: {node['type']}"
         self._current_agent_id = node["id"]
         return await handler(node.get("config", {}), trigger_data)
 
-    async def _handle_manual(self, config, trigger_data):
+    async def _handle_manual(self, config, trigger_data, extra_vars=None):
         return trigger_data or {}
 
-    async def _handle_llm(self, config, td):
-        prompt = self._render_template(config.get("prompt", ""))
+    async def _handle_llm(self, config, td, extra_vars=None):
+        prompt = self._render_template(config.get("prompt", ""), extra_vars)
         model = config.get("model")
         temperature = config.get("temperature", 0.7)
         mode = config.get("mode", "cloud")  # ← "cloud" по умолчанию
+        connection_id = config.get("connection_id")
 
         try:
-            return await self.llm.generate(prompt, model, temperature, mode)
+            return await self.llm.generate(prompt, model, temperature, mode, connection_id=connection_id)
         except Exception as e:
             return f"LLM Error: {str(e)}"
 
@@ -235,30 +343,64 @@ class WorkflowEngine:
             except Exception as e:
                 return f"HTTP Error: {str(e)}"
 
-    async def _handle_condition(self, config, td):
-        expression = self._render_template(config.get("expression", "True"))
+    async def _handle_telegram_send(self, config, td, extra_vars=None):
+        """
+        Отправка сообщения через Telegram Bot API, используя bot_token
+        из подключения (Connections → Инструменты → Telegram Bot).
+        """
+        connection = self._get_connection(config.get("connection_id"))
+        if not connection or connection.get("provider") != "telegram_bot":
+            return "Telegram Error: не выбрано подключение Telegram Bot (Connections → Инструменты)"
+
+        bot_token = connection["config"].get("bot_token")
+        if not bot_token:
+            return "Telegram Error: у подключения не задан bot_token"
+
+        chat_id = self._render_template(str(config.get("chat_id", "")), extra_vars)
+        text = self._render_template(config.get("message", ""), extra_vars)
+
+        if not chat_id:
+            return "Telegram Error: не указан chat_id"
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                    json={"chat_id": chat_id, "text": text},
+                )
+                return {"status_code": response.status_code, "body": response.text[:500]}
+        except Exception as e:
+            return f"Telegram Error: {str(e)}"
+
+    async def _handle_condition(self, config, td, extra_vars=None):
+        expression = self._render_template(config.get("expression", "True"), extra_vars)
         try:
             result = eval(expression, {"__builtins__": {}}, self.context)
             return result
         except:
             return False
 
-    async def _handle_print(self, config, td):
-        value = self._render_template(config.get("value", "{last_result}"))
+    async def _handle_print(self, config, td, extra_vars=None):
+        value = self._render_template(config.get("value", "{last_result}"), extra_vars)
         print(f"[FlowMind] {value}")
         return value
 
-    async def _handle_agent(self, config, td):
+    async def _handle_agent(self, config, td, extra_vars=None):
         """
-        MVP agent-loop: LLM (через Ollama /api/chat + tools) сам решает,
-        вызывать ли инструмент (пока поддерживается только тип "http") и когда
-        остановиться и дать финальный ответ.
+        Agent-loop: LLM (Ollama локально, либо openai-совместимое облачное подключение)
+        сам решает, вызывать ли инструмент и когда остановиться и дать финальный ответ.
+
+        Инструментом может стать НОДА ЛЮБОГО ТИПА (http, telegram_send, llm, condition, print,
+        в будущем — что угодно ещё) — единственное условие: у неё в конфиге заполнено
+        tool_name/tool_description. Так новые типы нод автоматически становятся доступны
+        агенту без правок в этом методе.
         """
         system_prompt = config.get("system_prompt", "Ты — полезный ассистент.")
         model = config.get("model", "qwen2.5")
         mode = config.get("mode", "local")
         max_iterations = config.get("max_iterations", 5)
         temperature = config.get("temperature", 0.3)  # ниже, чем у обычной llm-ноды — стабильнее tool calling
+        connection_id = config.get("connection_id")
 
         # Инструменты определяются рёбрами графа (agent --tool--> node),
         # плюс поддержка старого формата config.tools для обратной совместимости.
@@ -268,14 +410,20 @@ class WorkflowEngine:
             if edge.get("type") == "tool" and edge.get("from_node") == agent_node_id and edge.get("to_node") != agent_node_id:
                 tool_node_ids.add(edge["to_node"])
 
-        # Собираем схемы инструментов из указанных tool-нод
+        # Собираем схемы инструментов из указанных tool-нод. Нода годится в инструменты,
+        # если у неё есть обработчик и явно размечены tool_name/tool_description —
+        # тип ноды при этом не имеет значения.
         tool_nodes = {}
         tool_schemas = []
         for node_id in tool_node_ids:
             tool_node = self.nodes_by_id.get(node_id)
-            if not tool_node or tool_node["type"] != "http":
-                continue  # MVP: пока поддерживаем только http-ноды как инструменты
+            if not tool_node:
+                continue
             tconf = tool_node.get("config", {})
+            if not (tconf.get("tool_name") or tconf.get("tool_description")):
+                continue  # нода не размечена как инструмент — пропускаем
+            if not self._get_handler(tool_node["type"]):
+                continue  # неизвестный тип ноды — нечем выполнить
             tool_name = tconf.get("tool_name", node_id)
             tool_nodes[tool_name] = tool_node
             tool_schemas.append({
@@ -299,7 +447,10 @@ class WorkflowEngine:
 
         try:
             for _ in range(max_iterations):
-                message = await self.llm.chat(messages, model=model, tools=tool_schemas or None, temperature=temperature, mode=mode)
+                message = await self.llm.chat(
+                    messages, model=model, tools=tool_schemas or None,
+                    temperature=temperature, mode=mode, connection_id=connection_id,
+                )
                 messages.append(message)
                 trace.append(message)
 
@@ -319,7 +470,8 @@ class WorkflowEngine:
                     if not tool_node:
                         tool_result = f"Unknown tool: {name}"
                     else:
-                        tool_result = await self._handle_http(tool_node.get("config", {}), td, extra_vars=args)
+                        tool_handler = self._get_handler(tool_node["type"])
+                        tool_result = await tool_handler(tool_node.get("config", {}), td, extra_vars=args)
 
                     tool_message = {
                         "role": "tool",

@@ -7,6 +7,7 @@ import {
     GitBranch,
     Terminal,
     Bot,
+    Send,
 } from "lucide-react";
 
 export const NODE_META: Record<
@@ -55,6 +56,12 @@ export const NODE_META: Record<
         badge: "bg-indigo-100 text-indigo-700",
         ring: "border-indigo-200",
     },
+    telegram_send: {
+        label: "Telegram Send",
+        icon: Send,
+        badge: "bg-sky-100 text-sky-700",
+        ring: "border-sky-200",
+    },
 };
 
 function preview(type: string, config: Record<string, any>): string {
@@ -72,6 +79,8 @@ function preview(type: string, config: Record<string, any>): string {
             return config.value || "{last_result}";
         case "agent":
             return config.system_prompt || "no system prompt";
+        case "telegram_send":
+            return config.chat_id ? `→ ${config.chat_id}` : "no chat_id";
         default:
             return "";
     }

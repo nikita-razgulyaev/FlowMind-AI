@@ -24,3 +24,13 @@ class Execution(Base):
     logs = Column(JSON, default=list)
     started_at = Column(DateTime(timezone=True), server_default=func.now())
     finished_at = Column(DateTime(timezone=True), nullable=True)
+
+class Connection(Base):
+    __tablename__ = "connections"
+
+    id = Column(Integer, primary_key=True, index=True)
+    category = Column(String, nullable=False)   # "ai_api" | "tool"
+    provider = Column(String, nullable=False)   # "huggingface" | "openai_compatible" | "telegram_bot" | "google_sheets" | "google_calendar"
+    name = Column(String, nullable=False)
+    config = Column(JSON, default=dict)          # секреты/параметры конкретного провайдера
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

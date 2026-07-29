@@ -1,4 +1,4 @@
-import type { Workflow } from "../types/workflow";
+import type { Workflow, Connection } from "../types/workflow";
 
 const API_BASE = "/api";
 
@@ -67,6 +67,12 @@ class ApiClient {
         });
     }
 
+    async deleteWorkflow(
+        id: number,
+    ): Promise<ApiResponse<{ deleted: number }>> {
+        return this.request(`/workflows/${id}`, { method: "DELETE" });
+    }
+
     async executeWorkflow(
         id: number,
         triggerData?: Record<string, any>,
@@ -96,6 +102,28 @@ class ApiClient {
 
     async getTemplates(): Promise<ApiResponse<Record<string, any>>> {
         return this.request("/templates/");
+    }
+
+    async getConnections(
+        category?: "ai_api" | "tool",
+    ): Promise<ApiResponse<Connection[]>> {
+        const query = category ? `?category=${category}` : "";
+        return this.request(`/connections/${query}`);
+    }
+
+    async createConnection(
+        connection: Omit<Connection, "id" | "created_at">,
+    ): Promise<ApiResponse<Connection>> {
+        return this.request("/connections/", {
+            method: "POST",
+            body: JSON.stringify(connection),
+        });
+    }
+
+    async deleteConnection(
+        id: number,
+    ): Promise<ApiResponse<{ deleted: number }>> {
+        return this.request(`/connections/${id}`, { method: "DELETE" });
     }
 }
 
