@@ -13,6 +13,7 @@ export interface ProviderDef {
     note?: string;
     usedFor?: string;
     comingSoon?: boolean;
+    oauth?: boolean; // подключается через "Войти через Google", а не через форму с полями
 }
 
 export const PROVIDERS: ProviderDef[] = [
@@ -65,8 +66,8 @@ export const PROVIDERS: ProviderDef[] = [
         label: "Google Таблицы",
         category: "tool",
         fields: [],
-        comingSoon: true,
-        note: "Требует OAuth с Google — появится позже",
+        oauth: true,
+        note: "Вход через Google — доступ только к Таблицам",
         usedFor: "занесение клиента в таблицу",
     },
     {
@@ -74,8 +75,8 @@ export const PROVIDERS: ProviderDef[] = [
         label: "Google Календарь",
         category: "tool",
         fields: [],
-        comingSoon: true,
-        note: "Требует OAuth с Google — появится позже",
+        oauth: true,
+        note: "Вход через Google — доступ только к Календарю",
         usedFor: "планирование встречи",
     },
 ];

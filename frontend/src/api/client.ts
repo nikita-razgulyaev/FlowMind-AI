@@ -125,6 +125,15 @@ class ApiClient {
     ): Promise<ApiResponse<{ deleted: number }>> {
         return this.request(`/connections/${id}`, { method: "DELETE" });
     }
+
+    async startGoogleOAuth(
+        provider: string,
+        name: string,
+    ): Promise<ApiResponse<{ auth_url: string }>> {
+        return this.request(
+            `/oauth/google/start?provider=${encodeURIComponent(provider)}&name=${encodeURIComponent(name)}`,
+        );
+    }
 }
 
 export const api = new ApiClient();

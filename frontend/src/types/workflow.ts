@@ -9,6 +9,8 @@ export interface WorkflowNode {
         | "print"
         | "agent"
         | "telegram_send"
+        | "google_sheets_append"
+        | "google_calendar_create_event"
         | "file_read"
         | "file_write";
     config: Record<string, any>;

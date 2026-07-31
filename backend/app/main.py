@@ -1,10 +1,16 @@
 import traceback
+import os
+import json
+from datetime import datetime, timedelta
+from urllib.parse import urlencode
 
 from dotenv import load_dotenv
 load_dotenv()
 
+import httpx
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List, Dict, Any
@@ -17,7 +23,22 @@ from .worker import WorkflowEngine
 
 app = FastAPI(title="FlowMind AI Lite")
 
-SECRET_KEYS = {"api_key", "bot_token", "token", "password", "secret"}
+# Данные OAuth-приложения — заводятся в Google Cloud Console (см. инструкцию),
+# сюда попадают только через .env, в БД никогда не хранятся.
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/oauth/google/callback")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+# Параметризовано ради тестируемости (в тестах подменяются на локальный мок-сервер)
+GOOGLE_AUTH_URL = os.getenv("GOOGLE_AUTH_URL", "https://accounts.google.com/o/oauth2/v2/auth")
+GOOGLE_TOKEN_URL = os.getenv("GOOGLE_TOKEN_URL", "https://oauth2.googleapis.com/token")
+
+GOOGLE_SCOPES = {
+    "google_sheets": "https://www.googleapis.com/auth/spreadsheets",
+    "google_calendar": "https://www.googleapis.com/auth/calendar",
+}
+
+SECRET_KEYS = {"api_key", "bot_token", "token", "password", "secret", "access_token", "refresh_token"}
 
 def _mask_connection(conn: Connection) -> dict:
     masked_config = {}
@@ -131,10 +152,13 @@ async def execute_workflow(workflow_id: int, trigger_data: Dict[str, Any] = None
     # /connections/, этот эндпоинт никогда не отдаёт данные наружу, а использует
     # их только внутри процесса выполнения.
     conn_result = await db.execute(select(Connection))
-    connections = {
-        c.id: {"provider": c.provider, "config": c.config}
-        for c in conn_result.scalars().all()
-    }
+    all_connections = conn_result.scalars().all()
+    connections = {}
+    for c in all_connections:
+        cfg = c.config
+        if c.provider in GOOGLE_SCOPES:
+            cfg = await _refresh_google_connection_if_needed(c, db)
+        connections[c.id] = {"provider": c.provider, "config": cfg}
 
     engine_obj = WorkflowEngine(workflow_dict, execution.id, connections=connections)
     
@@ -219,3 +243,109 @@ async def delete_connection(connection_id: int, db: AsyncSession = Depends(get_d
     await db.delete(conn)
     await db.commit()
     return {"deleted": connection_id}
+
+
+@app.get("/oauth/google/start")
+async def google_oauth_start(provider: str, name: str):
+    """Возвращает ссылку на экран согласия Google — фронтенд делает на неё редирект."""
+    if provider not in GOOGLE_SCOPES:
+        raise HTTPException(400, f"Unknown Google provider: {provider}")
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(
+            500,
+            "GOOGLE_CLIENT_ID не задан в .env — сначала заведи OAuth-приложение в Google Cloud Console",
+        )
+
+    state = json.dumps({"provider": provider, "name": name})
+    params = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "response_type": "code",
+        "scope": GOOGLE_SCOPES[provider],
+        "access_type": "offline",   # ← без этого Google не выдаст refresh_token
+        "prompt": "consent",        # ← иначе refresh_token придёт только при первом согласии
+        "state": state,
+    }
+    return {"auth_url": f"{GOOGLE_AUTH_URL}?{urlencode(params)}"}
+
+
+@app.get("/oauth/google/callback")
+async def google_oauth_callback(code: str, state: str, db: AsyncSession = Depends(get_db)):
+    """Google возвращает пользователя сюда после согласия. Обмениваем code на токены и сохраняем подключение."""
+    try:
+        state_data = json.loads(state)
+        provider = state_data["provider"]
+        name = state_data["name"]
+    except (json.JSONDecodeError, KeyError):
+        raise HTTPException(400, "Invalid state")
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(GOOGLE_TOKEN_URL, data={
+            "code": code,
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "redirect_uri": GOOGLE_REDIRECT_URI,
+            "grant_type": "authorization_code",
+        })
+        if response.status_code != 200:
+            return RedirectResponse(url=f"{FRONTEND_URL}/connections?error=google_oauth_failed")
+        tokens = response.json()
+
+    conn = Connection(
+        category="tool",
+        provider=provider,
+        name=name,
+        config={
+            "access_token": tokens["access_token"],
+            "refresh_token": tokens.get("refresh_token"),
+            "expires_in": tokens.get("expires_in", 3600),
+            "obtained_at": datetime.utcnow().isoformat(),
+        },
+    )
+    db.add(conn)
+    await db.commit()
+    return RedirectResponse(url=f"{FRONTEND_URL}/connections?connected=1")
+
+
+async def _refresh_google_connection_if_needed(conn: Connection, db: AsyncSession) -> dict:
+    """
+    Проверяет, не истёк ли access_token (с запасом в 60 секунд), и если истёк —
+    обновляет его через refresh_token, сохраняя новое значение в БД.
+    Возвращает актуальный (немаскированный) config для использования движком.
+    """
+    cfg = dict(conn.config or {})
+    obtained_at = cfg.get("obtained_at")
+    expires_in = cfg.get("expires_in", 3600)
+    refresh_token = cfg.get("refresh_token")
+
+    is_expired = True
+    if obtained_at:
+        try:
+            obtained = datetime.fromisoformat(obtained_at)
+            is_expired = datetime.utcnow() >= obtained + timedelta(seconds=expires_in - 60)
+        except ValueError:
+            is_expired = True
+
+    if not is_expired or not refresh_token:
+        return cfg
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(GOOGLE_TOKEN_URL, data={
+            "refresh_token": refresh_token,
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "grant_type": "refresh_token",
+        })
+        if response.status_code != 200:
+            # Не удалось обновить — отдаём как есть, нода сама сообщит об ошибке авторизации
+            return cfg
+        tokens = response.json()
+
+    cfg["access_token"] = tokens["access_token"]
+    cfg["expires_in"] = tokens.get("expires_in", expires_in)
+    cfg["obtained_at"] = datetime.utcnow().isoformat()
+    # refresh_token Google обычно не переотдаёт повторно — сохраняем старый
+    conn.config = cfg
+    db.add(conn)
+    await db.commit()
+    return cfg

@@ -33,12 +33,16 @@ const nodeTypes = {
     print: CanvasNode,
     agent: CanvasNode,
     telegram_send: CanvasNode,
+    google_sheets_append: CanvasNode,
+    google_calendar_create_event: CanvasNode,
 };
 
 const PALETTE: { type: string }[] = [
     { type: "manual" },
     { type: "http" },
     { type: "telegram_send" },
+    { type: "google_sheets_append" },
+    { type: "google_calendar_create_event" },
     { type: "llm" },
     { type: "agent" },
     { type: "condition" },
@@ -62,6 +66,22 @@ function defaultConfig(type: string): Record<string, any> {
             return { method: "GET", url: "" };
         case "telegram_send":
             return { connection_id: undefined, chat_id: "", message: "" };
+        case "google_sheets_append":
+            return {
+                connection_id: undefined,
+                spreadsheet_id: "",
+                range: "A1",
+                values: "",
+            };
+        case "google_calendar_create_event":
+            return {
+                connection_id: undefined,
+                calendar_id: "primary",
+                summary: "",
+                description: "",
+                start_datetime: "",
+                end_datetime: "",
+            };
         case "print":
             return { value: "" };
         case "agent":

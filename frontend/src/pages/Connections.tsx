@@ -34,6 +34,23 @@ function ConnectionModal({
         }
         setSaving(true);
         setError(null);
+
+        if (provider?.oauth) {
+            const { data, error } = await api.startGoogleOAuth(
+                providerKey,
+                name.trim(),
+            );
+            setSaving(false);
+            if (error) {
+                setError(error);
+                return;
+            }
+            if (data?.auth_url) {
+                window.location.href = data.auth_url; // полный переход — иначе OAuth-редирект не сработает
+            }
+            return;
+        }
+
         const { data, error } = await api.createConnection({
             category,
             provider: providerKey,
@@ -93,6 +110,12 @@ function ConnectionModal({
                         <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                             {provider.note}
                         </p>
+                    ) : provider?.oauth ? (
+                        <p className="text-xs text-blue-600 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+                            Откроется окно входа Google — после согласия
+                            подключение появится здесь автоматически.
+                            {provider.note ? ` ${provider.note}.` : ""}
+                        </p>
                     ) : (
                         provider?.fields.map((f) => (
                             <div key={f.key}>
@@ -113,9 +136,13 @@ function ConnectionModal({
                         ))
                     )}
 
-                    {provider?.note && !provider.comingSoon && (
-                        <p className="text-xs text-gray-400">{provider.note}</p>
-                    )}
+                    {provider?.note &&
+                        !provider.comingSoon &&
+                        !provider.oauth && (
+                            <p className="text-xs text-gray-400">
+                                {provider.note}
+                            </p>
+                        )}
 
                     {error && <p className="text-xs text-red-600">{error}</p>}
                 </div>
@@ -132,7 +159,11 @@ function ConnectionModal({
                         disabled={saving || provider?.comingSoon}
                         className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium"
                     >
-                        {saving ? "Сохраняем..." : "Подключить"}
+                        {saving
+                            ? "..."
+                            : provider?.oauth
+                              ? "Войти через Google"
+                              : "Подключить"}
                     </button>
                 </div>
             </div>
@@ -259,9 +290,28 @@ export default function Connections() {
     const [modalCategory, setModalCategory] = useState<
         "ai_api" | "tool" | null
     >(null);
+    const [oauthBanner, setOauthBanner] = useState<{
+        ok: boolean;
+        text: string;
+    } | null>(null);
 
     useEffect(() => {
         load();
+        const params = new URLSearchParams(window.location.search);
+        if (params.get("connected")) {
+            setOauthBanner({
+                ok: true,
+                text: "Google-аккаунт успешно подключён.",
+            });
+        } else if (params.get("error")) {
+            setOauthBanner({
+                ok: false,
+                text: "Не получилось подключить Google — проверь настройки OAuth в .env.",
+            });
+        }
+        if (params.get("connected") || params.get("error")) {
+            window.history.replaceState({}, "", "/connections");
+        }
     }, []);
 
     const load = async () => {
@@ -296,6 +346,18 @@ export default function Connections() {
                         API-ключи и токены для облачных моделей и внешних
                         сервисов
                     </p>
+
+                    {oauthBanner && (
+                        <div
+                            className={`text-sm rounded-lg px-4 py-3 mb-6 border ${
+                                oauthBanner.ok
+                                    ? "bg-emerald-50 border-emerald-100 text-emerald-700"
+                                    : "bg-red-50 border-red-100 text-red-600"
+                            }`}
+                        >
+                            {oauthBanner.text}
+                        </div>
+                    )}
 
                     {isLoading ? (
                         <p className="text-sm text-gray-400">Загрузка...</p>

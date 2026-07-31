@@ -298,6 +298,8 @@ class WorkflowEngine:
             "print": self._handle_print,
             "agent": self._handle_agent,
             "telegram_send": self._handle_telegram_send,
+            "google_sheets_append": self._handle_google_sheets_append,
+            "google_calendar_create_event": self._handle_google_calendar_create_event,
         }
         return handlers.get(node_type)
 
@@ -371,6 +373,78 @@ class WorkflowEngine:
                 return {"status_code": response.status_code, "body": response.text[:500]}
         except Exception as e:
             return f"Telegram Error: {str(e)}"
+
+    async def _handle_google_sheets_append(self, config, td, extra_vars=None):
+        """
+        Добавляет строку в Google Таблицу. config.values — строка с разделителем-запятой,
+        например "{client_name}, {phone}, {date}" — каждый {placeholder} подставляется
+        из контекста выполнения или аргументов агента (extra_vars).
+        """
+        connection = self._get_connection(config.get("connection_id"))
+        if not connection or connection.get("provider") != "google_sheets":
+            return "Google Sheets Error: не выбрано подключение Google Таблицы (Connections → Инструменты)"
+
+        access_token = connection["config"].get("access_token")
+        if not access_token:
+            return "Google Sheets Error: нет access_token — переподключи аккаунт на странице Подключения"
+
+        spreadsheet_id = self._render_template(config.get("spreadsheet_id", ""), extra_vars)
+        sheet_range = config.get("range", "A1")
+        raw_values = self._render_template(config.get("values", ""), extra_vars)
+        row = [v.strip() for v in raw_values.split(",")] if raw_values else []
+
+        if not spreadsheet_id:
+            return "Google Sheets Error: не указан spreadsheet_id"
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values/{sheet_range}:append",
+                    params={"valueInputOption": "USER_ENTERED"},
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    json={"values": [row]},
+                )
+                return {"status_code": response.status_code, "body": response.text[:500]}
+        except Exception as e:
+            return f"Google Sheets Error: {str(e)}"
+
+    async def _handle_google_calendar_create_event(self, config, td, extra_vars=None):
+        """
+        Создаёт событие в Google Календаре. start_datetime/end_datetime — ISO 8601
+        (например 2026-08-01T15:00:00+03:00), можно с {placeholder} для подстановки.
+        """
+        connection = self._get_connection(config.get("connection_id"))
+        if not connection or connection.get("provider") != "google_calendar":
+            return "Google Calendar Error: не выбрано подключение Google Календарь (Connections → Инструменты)"
+
+        access_token = connection["config"].get("access_token")
+        if not access_token:
+            return "Google Calendar Error: нет access_token — переподключи аккаунт на странице Подключения"
+
+        calendar_id = config.get("calendar_id") or "primary"
+        summary = self._render_template(config.get("summary", ""), extra_vars)
+        description = self._render_template(config.get("description", ""), extra_vars)
+        start_dt = self._render_template(config.get("start_datetime", ""), extra_vars)
+        end_dt = self._render_template(config.get("end_datetime", ""), extra_vars)
+
+        if not (start_dt and end_dt):
+            return "Google Calendar Error: не указаны start_datetime/end_datetime"
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    json={
+                        "summary": summary,
+                        "description": description,
+                        "start": {"dateTime": start_dt},
+                        "end": {"dateTime": end_dt},
+                    },
+                )
+                return {"status_code": response.status_code, "body": response.text[:500]}
+        except Exception as e:
+            return f"Google Calendar Error: {str(e)}"
 
     async def _handle_condition(self, config, td, extra_vars=None):
         expression = self._render_template(config.get("expression", "True"), extra_vars)

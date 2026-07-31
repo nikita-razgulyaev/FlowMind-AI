@@ -8,6 +8,8 @@ import {
     Terminal,
     Bot,
     Send,
+    Table,
+    CalendarPlus,
 } from "lucide-react";
 
 export const NODE_META: Record<
@@ -62,6 +64,18 @@ export const NODE_META: Record<
         badge: "bg-sky-100 text-sky-700",
         ring: "border-sky-200",
     },
+    google_sheets_append: {
+        label: "Google Sheets",
+        icon: Table,
+        badge: "bg-green-100 text-green-700",
+        ring: "border-green-200",
+    },
+    google_calendar_create_event: {
+        label: "Google Calendar",
+        icon: CalendarPlus,
+        badge: "bg-red-100 text-red-700",
+        ring: "border-red-200",
+    },
 };
 
 function preview(type: string, config: Record<string, any>): string {
@@ -81,6 +95,12 @@ function preview(type: string, config: Record<string, any>): string {
             return config.system_prompt || "no system prompt";
         case "telegram_send":
             return config.chat_id ? `→ ${config.chat_id}` : "no chat_id";
+        case "google_sheets_append":
+            return config.spreadsheet_id
+                ? `→ ${config.spreadsheet_id.slice(0, 20)}...`
+                : "no spreadsheet_id";
+        case "google_calendar_create_event":
+            return config.summary || "no summary";
         default:
             return "";
     }

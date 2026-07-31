@@ -109,6 +109,12 @@ export default function NodeConfigPanel({
     const telegramConnections = connections.filter(
         (c) => c.category === "tool" && c.provider === "telegram_bot",
     );
+    const sheetsConnections = connections.filter(
+        (c) => c.category === "tool" && c.provider === "google_sheets",
+    );
+    const calendarConnections = connections.filter(
+        (c) => c.category === "tool" && c.provider === "google_calendar",
+    );
 
     return (
         <div className="w-96 shrink-0 bg-white border-l border-gray-200 h-full overflow-y-auto">
@@ -358,6 +364,210 @@ export default function NodeConfigPanel({
                                     },
                                 },
                                 required: ["chat_id", "message"],
+                            }}
+                        />
+                    </>
+                )}
+
+                {node.type === "google_sheets_append" && (
+                    <>
+                        <div>
+                            <label className={label}>
+                                Подключение (Connections → Инструменты → Google
+                                Таблицы)
+                            </label>
+                            <select
+                                value={cfg.connection_id ?? ""}
+                                onChange={(e) =>
+                                    set({
+                                        connection_id: e.target.value
+                                            ? Number(e.target.value)
+                                            : undefined,
+                                    })
+                                }
+                                className={input}
+                            >
+                                <option value="">— выбери подключение —</option>
+                                {sheetsConnections.map((c) => (
+                                    <option key={c.id} value={c.id}>
+                                        {c.name}
+                                    </option>
+                                ))}
+                            </select>
+                            {sheetsConnections.length === 0 && (
+                                <p className="text-xs text-amber-600 mt-1">
+                                    Нет подключений Google Таблицы — добавь на
+                                    странице Подключения
+                                </p>
+                            )}
+                        </div>
+                        <div>
+                            <label className={label}>
+                                Spreadsheet ID (можно с {"{param}"})
+                            </label>
+                            <input
+                                value={cfg.spreadsheet_id || ""}
+                                onChange={(e) =>
+                                    set({ spreadsheet_id: e.target.value })
+                                }
+                                placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms"
+                                className={input}
+                            />
+                            <p className="text-[11px] text-gray-400 mt-1">
+                                Часть URL таблицы между /d/ и /edit
+                            </p>
+                        </div>
+                        <div>
+                            <label className={label}>
+                                Range (лист + ячейка)
+                            </label>
+                            <input
+                                value={cfg.range || "A1"}
+                                onChange={(e) => set({ range: e.target.value })}
+                                placeholder="Sheet1!A1"
+                                className={input}
+                            />
+                        </div>
+                        <div>
+                            <label className={label}>
+                                Значения строки, через запятую (можно с{" "}
+                                {"{param}"})
+                            </label>
+                            <input
+                                value={cfg.values || ""}
+                                onChange={(e) =>
+                                    set({ values: e.target.value })
+                                }
+                                placeholder="{client_name}, {phone}, {date}"
+                                className={input}
+                            />
+                        </div>
+                        <ToolSettingsFields
+                            cfg={cfg}
+                            set={set}
+                            defaultProps={{
+                                type: "object",
+                                properties: {
+                                    client_name: { type: "string" },
+                                    phone: { type: "string" },
+                                    date: { type: "string" },
+                                },
+                                required: ["client_name"],
+                            }}
+                        />
+                    </>
+                )}
+
+                {node.type === "google_calendar_create_event" && (
+                    <>
+                        <div>
+                            <label className={label}>
+                                Подключение (Connections → Инструменты → Google
+                                Календарь)
+                            </label>
+                            <select
+                                value={cfg.connection_id ?? ""}
+                                onChange={(e) =>
+                                    set({
+                                        connection_id: e.target.value
+                                            ? Number(e.target.value)
+                                            : undefined,
+                                    })
+                                }
+                                className={input}
+                            >
+                                <option value="">— выбери подключение —</option>
+                                {calendarConnections.map((c) => (
+                                    <option key={c.id} value={c.id}>
+                                        {c.name}
+                                    </option>
+                                ))}
+                            </select>
+                            {calendarConnections.length === 0 && (
+                                <p className="text-xs text-amber-600 mt-1">
+                                    Нет подключений Google Календарь — добавь на
+                                    странице Подключения
+                                </p>
+                            )}
+                        </div>
+                        <div>
+                            <label className={label}>Calendar ID</label>
+                            <input
+                                value={cfg.calendar_id || "primary"}
+                                onChange={(e) =>
+                                    set({ calendar_id: e.target.value })
+                                }
+                                className={input}
+                            />
+                        </div>
+                        <div>
+                            <label className={label}>
+                                Название события (можно с {"{param}"})
+                            </label>
+                            <input
+                                value={cfg.summary || ""}
+                                onChange={(e) =>
+                                    set({ summary: e.target.value })
+                                }
+                                placeholder="Встреча с {client_name}"
+                                className={input}
+                            />
+                        </div>
+                        <div>
+                            <label className={label}>Описание</label>
+                            <input
+                                value={cfg.description || ""}
+                                onChange={(e) =>
+                                    set({ description: e.target.value })
+                                }
+                                className={input}
+                            />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                            <div>
+                                <label className={label}>
+                                    Начало (ISO 8601)
+                                </label>
+                                <input
+                                    value={cfg.start_datetime || ""}
+                                    onChange={(e) =>
+                                        set({ start_datetime: e.target.value })
+                                    }
+                                    placeholder="2026-08-01T15:00:00+03:00"
+                                    className={input}
+                                />
+                            </div>
+                            <div>
+                                <label className={label}>
+                                    Конец (ISO 8601)
+                                </label>
+                                <input
+                                    value={cfg.end_datetime || ""}
+                                    onChange={(e) =>
+                                        set({ end_datetime: e.target.value })
+                                    }
+                                    placeholder="2026-08-01T16:00:00+03:00"
+                                    className={input}
+                                />
+                            </div>
+                        </div>
+                        <ToolSettingsFields
+                            cfg={cfg}
+                            set={set}
+                            defaultProps={{
+                                type: "object",
+                                properties: {
+                                    client_name: { type: "string" },
+                                    start_datetime: {
+                                        type: "string",
+                                        description: "ISO 8601",
+                                    },
+                                    end_datetime: {
+                                        type: "string",
+                                        description: "ISO 8601",
+                                    },
+                                },
+                                required: ["start_datetime", "end_datetime"],
                             }}
                         />
                     </>
