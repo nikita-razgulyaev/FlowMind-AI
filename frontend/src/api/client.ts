@@ -1,4 +1,4 @@
-import type { Workflow } from "../types/workflow";
+import type { Workflow, Connection } from "../types/workflow";
 
 const API_BASE = "/api";
 
@@ -25,9 +25,9 @@ class ApiClient {
         if (!response.ok) {
             // Извлекаем сообщение об ошибке
             let errorMsg = "Unknown error";
-            if (typeof data.detail === 'string') {
+            if (typeof data.detail === "string") {
                 errorMsg = data.detail;
-            } else if (typeof data.error === 'string') {
+            } else if (typeof data.error === "string") {
                 errorMsg = data.error;
             } else if (data.detail) {
                 errorMsg = JSON.stringify(data.detail);
@@ -57,6 +57,22 @@ class ApiClient {
         });
     }
 
+    async updateWorkflow(
+        id: number,
+        workflow: Omit<Workflow, "id" | "created_at">,
+    ): Promise<ApiResponse<Workflow>> {
+        return this.request(`/workflows/${id}`, {
+            method: "PUT",
+            body: JSON.stringify(workflow),
+        });
+    }
+
+    async deleteWorkflow(
+        id: number,
+    ): Promise<ApiResponse<{ deleted: number }>> {
+        return this.request(`/workflows/${id}`, { method: "DELETE" });
+    }
+
     async executeWorkflow(
         id: number,
         triggerData?: Record<string, any>,
@@ -75,9 +91,7 @@ class ApiClient {
         });
     }
 
-    async getExecutions(
-        workflowId?: number,
-    ): Promise<ApiResponse<any[]>> {
+    async getExecutions(workflowId?: number): Promise<ApiResponse<any[]>> {
         const query = workflowId ? `?workflow_id=${workflowId}` : "";
         return this.request(`/executions/${query}`);
     }
@@ -88,6 +102,37 @@ class ApiClient {
 
     async getTemplates(): Promise<ApiResponse<Record<string, any>>> {
         return this.request("/templates/");
+    }
+
+    async getConnections(
+        category?: "ai_api" | "tool",
+    ): Promise<ApiResponse<Connection[]>> {
+        const query = category ? `?category=${category}` : "";
+        return this.request(`/connections/${query}`);
+    }
+
+    async createConnection(
+        connection: Omit<Connection, "id" | "created_at">,
+    ): Promise<ApiResponse<Connection>> {
+        return this.request("/connections/", {
+            method: "POST",
+            body: JSON.stringify(connection),
+        });
+    }
+
+    async deleteConnection(
+        id: number,
+    ): Promise<ApiResponse<{ deleted: number }>> {
+        return this.request(`/connections/${id}`, { method: "DELETE" });
+    }
+
+    async startGoogleOAuth(
+        provider: string,
+        name: string,
+    ): Promise<ApiResponse<{ auth_url: string }>> {
+        return this.request(
+            `/oauth/google/start?provider=${encodeURIComponent(provider)}&name=${encodeURIComponent(name)}`,
+        );
     }
 }
 
