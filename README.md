@@ -8,7 +8,7 @@
 
 FlowMind AI — no-code редактор для сборки AI-агентов и автоматизаций на визуальном графе (canvas), вдохновлённый n8n, но построенный вокруг агента с самого начала, а не поверх обычного automation-движка.
 
-Ключевое отличие: агент реально **рассуждает и сам решает**, какой инструмент вызвать и когда остановиться (полноценный tool calling), а не просто генерирует текст по цепочке шагов. И всё это может работать **полностью локально** — через [Ollama](https://ollama.com), без единого API-ключа и без счетов за токены — либо в облаке, если это осознанный выбор, а не единственный вариант.
+Ключевое отличие: агент реально **рассуждает и сам решает**, какой инструмент вызвать и когда остановиться (полноценный tool calling), а не просто генерирует текст по цепочке шагов. И всё это может работать **полностью локально** — через [Ollama](https://ollama.com), без API-ключа и счетов за токены — либо в облаке, если нужно больше мощностей или запуск на слабом железе.
 
 ### Для кого
 
@@ -164,16 +164,62 @@ npm run dev
 ## Структура проекта
 
 ```
-backend/
-  app/
-    main.py        — FastAPI-приложение, все эндпоинты
-    worker.py       — WorkflowEngine, LLMProvider, agent-loop
-    models.py       — SQLAlchemy-модели (Workflow, Execution, Connection)
-    schemas.py      — Pydantic-схемы
-    templates.py    — готовые шаблоны воркфлоу
-frontend/
-  src/
-    pages/          — Воркфлоу, Редактор, История, Настройки, Шаблоны, Подключения
-    components/canvas/ — нода на canvas, панель настроек, чат-лог, AI-чат (заготовка)
-    utils/          — форматирование логов, каталог провайдеров подключений
+FlowMind-AI/
+├── backend/
+│   ├── app/
+│   ├── venv/                  (.gitignore)
+│   ├── .env                   (.gitignore)
+│   ├── .env.example
+│   ├── Dockerfile
+│   ├── flowmind.db            (.gitignore)
+│   └── requirements.txt
+├── docs/
+│   └── screenshot.png
+├── frontend/
+│   ├── node_modules/          (.gitignore)
+│   ├── public/
+│   │   ├── favicon.svg
+│   │   └── icons.svg
+│   ├── src/
+│   │   ├── api/
+│   │   ├── components/
+│   │   │   └── canvas/
+│   │   │       ├── AiChatPanel.tsx
+│   │   │       ├── CanvasNode.tsx
+│   │   │       ├── ChatLogPanel.tsx
+│   │   │       ├── EditorSidebar.tsx
+│   │   │       └── NodeConfigPanel.tsx
+│   │   ├── pages/
+│   │   │   ├── Connections.tsx
+│   │   │   ├── ExecutionHistory.tsx
+│   │   │   ├── Settings.tsx
+│   │   │   ├── Templates.tsx
+│   │   │   ├── WorkflowEditor.tsx
+│   │   │   └── WorkflowList.tsx
+│   │   ├── types/
+│   │   │   └── workflow.ts
+│   │   ├── utils/
+│   │   │   ├── executionLog.ts
+│   │   │   ├── providers.ts
+│   │   │   └── settings.ts
+│   │   ├── App.tsx
+│   │   ├── index.css
+│   │   └── main.tsx
+│   ├── .gitignore
+│   ├── Dockerfile
+│   ├── eslint.config.js
+│   ├── index.html
+│   ├── nginx.conf
+│   ├── package-lock.json
+│   ├── package.json
+│   ├── postcss.config.js
+│   ├── tailwind.config.js
+│   ├── tsconfig.app.json
+│   ├── tsconfig.json
+│   ├── tsconfig.node.json
+│   └── vite.config.ts
+├── .gitignore
+├── docker-compose.yml
+├── docker-compose.cloud.yml
+└── README.md
 ```
