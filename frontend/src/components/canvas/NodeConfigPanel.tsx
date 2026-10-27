@@ -3,6 +3,7 @@ import { X, Trash2 } from "lucide-react";
 import type { WorkflowNode, Connection } from "../../types/workflow";
 import { api } from "../../api/client";
 import { NODE_META } from "./CanvasNode";
+import { useAuth } from "../../store/auth";
 
 const LLM_MODELS = {
     local: [
@@ -11,12 +12,9 @@ const LLM_MODELS = {
         { value: "mistral", label: "Mistral (Ollama)" },
     ],
     cloud: [
-        {
-            value: "Qwen/Qwen2.5-1.5B-Instruct",
-            label: "Qwen 1.5B (Hugging Face)",
-        },
-        { value: "Qwen/Qwen2.5-7B-Instruct", label: "Qwen 7B (Hugging Face)" },
+        { value: "", label: "По умолчанию (модель сервиса / подключения)" },
         { value: "gpt-4o-mini", label: "GPT-4o mini (OpenAI-совместимый)" },
+        { value: "openai/gpt-oss-120b:groq", label: "gpt-oss-120b (Hugging Face router)" },
     ],
 };
 
@@ -95,6 +93,9 @@ export default function NodeConfigPanel({
     const set = (patch: Record<string, any>) => onChange({ ...cfg, ...patch });
 
     const [connections, setConnections] = useState<Connection[]>([]);
+    // В облачной версии локальные модели (Ollama) недоступны — режим только Cloud.
+    const isCloudDeployment = useAuth((st) => st.config?.deployment_mode === "cloud");
+    const modes = (isCloudDeployment ? ["cloud"] : ["local", "cloud"]) as ("local" | "cloud")[];
 
     useEffect(() => {
         api.getConnections().then(({ data }) => {
@@ -104,7 +105,7 @@ export default function NodeConfigPanel({
 
     const aiConnections = connections.filter((c) => c.category === "ai_api");
     const openaiConnections = aiConnections.filter(
-        (c) => c.provider === "openai_compatible",
+        (c) => c.provider === "openai_compatible" || c.provider === "huggingface",
     );
     const telegramConnections = connections.filter(
         (c) => c.category === "tool" && c.provider === "telegram_bot",
@@ -147,7 +148,7 @@ export default function NodeConfigPanel({
                 {node.type === "llm" && (
                     <>
                         <div className="flex gap-2">
-                            {(["local", "cloud"] as const).map((m) => (
+                            {modes.map((m) => (
                                 <button
                                     key={m}
                                     onClick={() =>
@@ -184,7 +185,7 @@ export default function NodeConfigPanel({
                                     className={input}
                                 >
                                     <option value="">
-                                        — без подключения (через .env) —
+                                        — AI сервиса (по лимитам тарифа) —
                                     </option>
                                     {aiConnections.map((c) => (
                                         <option key={c.id} value={c.id}>
@@ -606,7 +607,7 @@ export default function NodeConfigPanel({
                 {node.type === "agent" && (
                     <>
                         <div className="flex gap-2">
-                            {(["local", "cloud"] as const).map((m) => (
+                            {modes.map((m) => (
                                 <button
                                     key={m}
                                     onClick={() => set({ mode: m })}
@@ -624,8 +625,8 @@ export default function NodeConfigPanel({
                         {cfg.mode === "cloud" && (
                             <div>
                                 <label className={label}>
-                                    Подключение (только openai-совместимые —
-                                    нужны для tool calling)
+                                    Подключение (нужна модель с tool calling;
+                                    без подключения — AI сервиса)
                                 </label>
                                 <select
                                     value={cfg.connection_id ?? ""}
@@ -639,7 +640,7 @@ export default function NodeConfigPanel({
                                     className={input}
                                 >
                                     <option value="">
-                                        — выбери подключение —
+                                        — AI сервиса (по лимитам тарифа) —
                                     </option>
                                     {openaiConnections.map((c) => (
                                         <option key={c.id} value={c.id}>
@@ -648,9 +649,9 @@ export default function NodeConfigPanel({
                                     ))}
                                 </select>
                                 {openaiConnections.length === 0 && (
-                                    <p className="text-xs text-amber-600 mt-1">
-                                        Нет подключений типа openai_compatible —
-                                        добавь на странице Подключения
+                                    <p className="text-xs text-gray-400 mt-1">
+                                        Свои ключи (OpenAI-совместимые, Hugging Face)
+                                        добавляются на странице «Подключения».
                                     </p>
                                 )}
                             </div>
@@ -659,11 +660,11 @@ export default function NodeConfigPanel({
                         <div>
                             <label className={label}>Model</label>
                             <input
-                                value={cfg.model || "qwen2.5"}
+                                value={cfg.model ?? (cfg.mode === "cloud" ? "" : "qwen2.5")}
                                 onChange={(e) => set({ model: e.target.value })}
                                 placeholder={
                                     cfg.mode === "cloud"
-                                        ? "gpt-4o-mini"
+                                        ? "пусто — модель по умолчанию"
                                         : "qwen2.5"
                                 }
                                 className={input}
@@ -735,6 +736,71 @@ export default function NodeConfigPanel({
                         <p className="text-xs text-gray-400">
                             Инструменты подключаются связью с нижнего разъёма (↓
                             инструменты) к HTTP или Telegram-ноде на canvas.
+                        </p>
+                    </>
+                )}
+
+                {node.type === "telegram_trigger" && (
+                    <>
+                        <div>
+                            <label className={label}>
+                                Бот (Подключения → Инструменты → Telegram Bot)
+                            </label>
+                            <select
+                                value={cfg.connection_id ?? ""}
+                                onChange={(e) =>
+                                    set({
+                                        connection_id: e.target.value
+                                            ? Number(e.target.value)
+                                            : undefined,
+                                    })
+                                }
+                                className={input}
+                            >
+                                <option value="">— выбери подключение —</option>
+                                {telegramConnections.map((c) => (
+                                    <option key={c.id} value={c.id}>
+                                        {c.name}
+                                    </option>
+                                ))}
+                            </select>
+                            {telegramConnections.length === 0 && (
+                                <p className="text-xs text-amber-600 mt-1">
+                                    Нет подключений Telegram Bot — добавь на
+                                    странице Подключения
+                                </p>
+                            )}
+                        </div>
+                        <div>
+                            <label className={label}>
+                                Разрешённые chat_id (через запятую, пусто — любые)
+                            </label>
+                            <input
+                                value={cfg.allowed_chat_ids || ""}
+                                onChange={(e) =>
+                                    set({ allowed_chat_ids: e.target.value })
+                                }
+                                placeholder="123456789, 987654321"
+                                className={input}
+                            />
+                        </div>
+                        <label className="flex items-center gap-2 text-sm text-gray-600">
+                            <input
+                                type="checkbox"
+                                checked={!!cfg.only_commands}
+                                onChange={(e) =>
+                                    set({ only_commands: e.target.checked })
+                                }
+                            />
+                            Реагировать только на команды (/start, /help…)
+                        </label>
+                        <p className="text-xs text-gray-400">
+                            Сценарий запускается на каждое входящее сообщение боту,
+                            пока воркфлоу активен (переключатель «Активен» в
+                            шапке). Доступны переменные {"{input}"},{" "}
+                            {"{telegram_chat_id}"}, {"{telegram_username}"},{" "}
+                            {"{telegram_first_name}"}. Нода Telegram Send с пустым
+                            chat_id отвечает в тот же чат.
                         </p>
                     </>
                 )}

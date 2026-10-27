@@ -10,6 +10,7 @@ import {
     Send,
     Table,
     CalendarPlus,
+    MessageCircle,
 } from "lucide-react";
 
 export const NODE_META: Record<
@@ -21,6 +22,12 @@ export const NODE_META: Record<
         icon: Play,
         badge: "bg-emerald-100 text-emerald-700",
         ring: "border-emerald-200",
+    },
+    telegram_trigger: {
+        label: "Telegram Trigger",
+        icon: MessageCircle,
+        badge: "bg-cyan-100 text-cyan-700",
+        ring: "border-cyan-200",
     },
     schedule: {
         label: "Schedule",
@@ -80,6 +87,8 @@ export const NODE_META: Record<
 
 function preview(type: string, config: Record<string, any>): string {
     switch (type) {
+        case "telegram_trigger":
+            return config.connection_id ? "входящее сообщение бота" : "выберите бота";
         case "llm":
             return config.prompt || "no prompt";
         case "http":
@@ -111,7 +120,7 @@ export default function CanvasNode({ id, type, data, selected }: NodeProps) {
     const Icon = meta.icon;
     const config = (data?.config as Record<string, any>) || {};
     const text = preview(type as string, config);
-    const isTrigger = type === "manual" || type === "schedule";
+    const isTrigger = type === "manual" || type === "schedule" || type === "telegram_trigger";
     const isAgent = type === "agent";
 
     return (

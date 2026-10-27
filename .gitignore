@@ -13,6 +13,7 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+venv/
 
 # Node
 node_modules/
@@ -34,3 +35,9 @@ yarn-debug.log*
 # OS
 .DS_Store
 Thumbs.db.env
+
+# Локальные БД и окружения
+*.db
+*.db-shm
+*.db-wal
+.env.prod

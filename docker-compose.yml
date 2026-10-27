@@ -1,29 +1,54 @@
+# Локальный запуск: FlowMind AI + Ollama (локальные модели), без регистрации и лимитов.
+#   docker compose up --build        →  http://localhost:8000
+#
+# Необязательный файл .env рядом с этим compose-файлом:
+#   OLLAMA_MODEL=qwen2.5   PLATFORM_LLM_API_KEY=hf_...   GOOGLE_CLIENT_ID=...   GOOGLE_CLIENT_SECRET=...
 services:
-  backend:
-    build: ./backend
+  app:
+    build: .
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"       # только localhost: в локальном режиме нет авторизации — не публикуйте порт наружу
     environment:
-      - DATABASE_URL=sqlite+aiosqlite:///./flowmind.db
-      - OLLAMA_URL=http://ollama:11434
+      DEPLOYMENT_MODE: local
+      DATABASE_URL: sqlite+aiosqlite:////data/flowmind.db
+      SECRET_KEY: ${SECRET_KEY:-local-only-secret-change-if-you-share-the-volume}
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5}
+      FRONTEND_URL: http://localhost:8000
+      PLATFORM_LLM_API_KEY: ${PLATFORM_LLM_API_KEY:-}
+      PLATFORM_LLM_MODEL: ${PLATFORM_LLM_MODEL:-openai/gpt-oss-120b:groq}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
     volumes:
-      - ./backend/data:/app/data
+      - flowmind-data:/data
     depends_on:
       - ollama
-
-  frontend:
-    build: ./frontend
-    ports:
-      - "80:80"
-    depends_on:
-      - backend
+    restart: unless-stopped
 
   ollama:
-    image: ollama/ollama
-    ports:
-      - "11434:11434"
+    image: ollama/ollama:latest
     volumes:
-      - ollama_data:/root/.ollama
+      - ollama-models:/root/.ollama
+    restart: unless-stopped
+    # Для GPU NVIDIA раскомментируйте (нужен nvidia-container-toolkit):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # Одноразовая загрузка модели при первом запуске (несколько ГБ — это нормально)
+  ollama-pull:
+    image: ollama/ollama:latest
+    depends_on:
+      - ollama
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-c", "until ollama list >/dev/null 2>&1; do sleep 2; done; ollama pull ${OLLAMA_MODEL:-qwen2.5}"]
+    restart: "no"
 
 volumes:
-  ollama_data:
+  flowmind-data:
+  ollama-models:

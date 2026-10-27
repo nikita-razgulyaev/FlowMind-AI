@@ -5,7 +5,7 @@ TEMPLATES = {
         "nodes": [
             {"id": "trigger_1", "type": "manual", "config": {}},
             {"id": "llm_1", "type": "llm", "config": {
-                "model": "Qwen/Qwen2.5-1.5B-Instruct",
+                "model": "",
                 "prompt": "Ты — поддержка компании. Ответь кратко и вежливо на:\n\n{input}",
                 "temperature": 0.5,
                 "mode": "cloud"
@@ -29,7 +29,7 @@ TEMPLATES = {
                 "url": "{input}"
             }},
             {"id": "llm_1", "type": "llm", "config": {
-                "model": "Qwen/Qwen2.5-1.5B-Instruct",
+                "model": "",
                 "prompt": "Сделай краткое саммари (3 предложения):\n\n{http_1}",
                 "temperature": 0.3,
                 "mode": "cloud"
@@ -54,7 +54,7 @@ TEMPLATES = {
                 "url": "https://api.open-meteo.com/v1/forecast?latitude=55.75&longitude=37.62&current=temperature"
             }},
             {"id": "llm_1", "type": "llm", "config": {
-                "model": "Qwen/Qwen2.5-1.5B-Instruct",
+                "model": "",
                 "prompt": "Температура: {http_1}. Что надеть? Ответь в 1 предложении.",
                 "temperature": 0.8,
                 "mode": "cloud"

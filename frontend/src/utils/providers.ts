@@ -29,7 +29,7 @@ export const PROVIDERS: ProviderDef[] = [
                 placeholder: "hf_...",
             },
         ],
-        note: "Облачные LLM/Agent-ноды (mode: cloud)",
+        note: "Облачные LLM/Agent-ноды через Hugging Face router (поддерживает tool calling)",
     },
     {
         key: "openai_compatible",

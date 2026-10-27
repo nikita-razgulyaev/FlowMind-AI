@@ -26,6 +26,7 @@ import { getSettings } from "../utils/settings";
 
 const nodeTypes = {
     manual: CanvasNode,
+    telegram_trigger: CanvasNode,
     schedule: CanvasNode,
     llm: CanvasNode,
     http: CanvasNode,
@@ -39,6 +40,7 @@ const nodeTypes = {
 
 const PALETTE: { type: string }[] = [
     { type: "manual" },
+    { type: "telegram_trigger" },
     { type: "http" },
     { type: "telegram_send" },
     { type: "google_sheets_append" },
@@ -62,6 +64,8 @@ function defaultConfig(type: string): Record<string, any> {
                 temperature: settings.defaultTemperature,
                 mode: settings.defaultMode,
             };
+        case "telegram_trigger":
+            return { connection_id: undefined, allowed_chat_ids: "", only_commands: false };
         case "http":
             return { method: "GET", url: "" };
         case "telegram_send":
@@ -146,6 +150,7 @@ export default function WorkflowEditor() {
     const [runStatus, setRunStatus] = useState<string | null>(null);
     const [showLog, setShowLog] = useState(false);
     const [showAiChat, setShowAiChat] = useState(false);
+    const [isActive, setIsActive] = useState(true);
     const [lastExecution, setLastExecution] = useState<{
         triggerInput?: string;
         logs: any[];
@@ -161,6 +166,7 @@ export default function WorkflowEditor() {
         if (data) {
             setName(data.name);
             setDescription(data.description);
+            setIsActive(data.is_active);
             setNodes(data.nodes.map(toFlowNode));
             setEdges(data.edges.map(toFlowEdge));
         }
@@ -248,8 +254,16 @@ export default function WorkflowEditor() {
                 type: e.sourceHandle === "out-tool" ? "tool" : "next",
             }),
         ),
-        is_active: true,
+        is_active: isActive,
     });
+
+    const applyAiGraph = (graph: { nodes: any[]; edges: any[] }) => {
+        setNodes(graph.nodes.map(toFlowNode));
+        setEdges(graph.edges.map(toFlowEdge));
+        setSelectedId(null);
+    };
+
+    const hasTelegramTrigger = nodes.some((n) => n.type === "telegram_trigger");
 
     const handleSave = async () => {
         setIsLoading(true);
@@ -322,6 +336,19 @@ export default function WorkflowEditor() {
                             <span className="text-xs text-gray-500 bg-gray-100 px-2.5 py-1 rounded-full">
                                 {runStatus}
                             </span>
+                        )}
+                        {hasTelegramTrigger && (
+                            <label
+                                className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer select-none"
+                                title="Пока воркфлоу активен, Telegram-триггер принимает сообщения"
+                            >
+                                <input
+                                    type="checkbox"
+                                    checked={isActive}
+                                    onChange={(e) => setIsActive(e.target.checked)}
+                                />
+                                Активен
+                            </label>
                         )}
                         <button
                             onClick={() => {
@@ -420,7 +447,13 @@ export default function WorkflowEditor() {
                     </div>
 
                     {showAiChat ? (
-                        <AiChatPanel />
+                        <AiChatPanel
+                            getGraph={() => {
+                                const p = buildPayload();
+                                return { nodes: p.nodes, edges: p.edges };
+                            }}
+                            onApply={applyAiGraph}
+                        />
                     ) : (
                         selectedNode && (
                             <NodeConfigPanel

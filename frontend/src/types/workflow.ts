@@ -2,6 +2,7 @@ export interface WorkflowNode {
     id: string;
     type:
         | "manual"
+        | "telegram_trigger"
         | "schedule"
         | "llm"
         | "http"
@@ -32,6 +33,8 @@ export interface Workflow {
     nodes: WorkflowNode[];
     edges: WorkflowEdge[];
     is_active: boolean;
+    is_ai?: boolean;
+    has_telegram_trigger?: boolean;
     created_at: string;
 }
 
@@ -39,6 +42,8 @@ export interface Execution {
     id: number;
     workflow_id: number;
     status: "pending" | "running" | "success" | "failed";
+    source?: "manual" | "telegram";
+    is_ai?: boolean;
     trigger_data: Record<string, any> | null;
     result: Record<string, any> | null;
     logs: ExecutionLog[] | null;

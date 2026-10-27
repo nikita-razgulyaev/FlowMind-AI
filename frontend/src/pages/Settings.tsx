@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Check } from "lucide-react";
 import EditorSidebar from "../components/canvas/EditorSidebar";
+import { useAuth } from "../store/auth";
 import {
-    DEFAULT_SETTINGS,
+    getDefaultSettings,
     getSettings,
     saveSettings,
     type AppSettings,
@@ -15,6 +16,8 @@ const input =
 export default function Settings() {
     const [settings, setSettings] = useState<AppSettings>(getSettings());
     const [saved, setSaved] = useState(false);
+    const isCloud = useAuth((st) => st.config?.deployment_mode === "cloud");
+    const modes = (isCloud ? ["cloud"] : ["local", "cloud"]) as ("local" | "cloud")[];
 
     const set = (patch: Partial<AppSettings>) => {
         setSettings((s) => ({ ...s, ...patch }));
@@ -28,8 +31,8 @@ export default function Settings() {
     };
 
     const handleReset = () => {
-        setSettings(DEFAULT_SETTINGS);
-        saveSettings(DEFAULT_SETTINGS);
+        setSettings(getDefaultSettings());
+        saveSettings(getDefaultSettings());
     };
 
     return (
@@ -45,18 +48,22 @@ export default function Settings() {
                         LLM/Agent-нод на canvas.
                     </p>
 
-                    <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-lg px-4 py-3 mb-6">
-                        Это не меняет реальное поведение backend —{" "}
-                        <code>OLLAMA_URL</code> и <code>HF_TOKEN</code>
-                        всё ещё настраиваются через <code>.env</code> на
-                        сервере.
+                    <div className="bg-blue-50 border border-blue-200 text-blue-800 text-xs rounded-lg px-4 py-3 mb-6">
+                        {isCloud ? (
+                            <>Настройки сохраняются в вашем аккаунте и действуют на всех устройствах. В облачной версии доступны облачные модели.</>
+                        ) : (
+                            <>
+                                Это дефолты для новых нод. Адрес Ollama (<code>OLLAMA_URL</code>) и ключ AI платформы
+                                (<code>PLATFORM_LLM_API_KEY</code>) задаются в <code>.env</code> на сервере.
+                            </>
+                        )}
                     </div>
 
                     <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-5">
                         <div>
                             <label className={label}>Режим по умолчанию</label>
                             <div className="flex gap-2">
-                                {(["local", "cloud"] as const).map((m) => (
+                                {modes.map((m) => (
                                     <button
                                         key={m}
                                         onClick={() => set({ defaultMode: m })}
@@ -68,7 +75,7 @@ export default function Settings() {
                                     >
                                         {m === "local"
                                             ? "Local (Ollama)"
-                                            : "Cloud (Hugging Face)"}
+                                            : "Cloud"}
                                     </button>
                                 ))}
                             </div>
@@ -97,7 +104,7 @@ export default function Settings() {
                                 onChange={(e) =>
                                     set({ defaultCloudModel: e.target.value })
                                 }
-                                placeholder="Qwen/Qwen2.5-1.5B-Instruct"
+                                placeholder="пусто — модель по умолчанию"
                                 className={input}
                             />
                         </div>
