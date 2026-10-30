@@ -131,6 +131,25 @@ async def start_checkout(db: AsyncSession, user: User, plan_code: str, period: s
         return {"action": "resumed"}
 
     provider = get_provider(provider_name)
+
+    # Не плодим pending-платежи: переиспользуем незавершённый платёж по тому же тарифу/периоду
+    existing = (await db.execute(
+        select(Payment).where(
+            Payment.user_id == user.id,
+            Payment.plan_code == plan.code,
+            Payment.period == period,
+            Payment.status.in_(("pending", "requires_action")),
+        ).order_by(Payment.id.desc())
+    )).scalars().first()
+    if existing is not None:
+        existing.amount = quote.amount
+        existing.plan_price = quote.price
+        existing.kind = quote.kind
+        existing.meta = {**(existing.meta or {}), "credit": quote.credit}
+        await db.commit()
+        await db.refresh(existing)
+        return {"action": "pay", "payment": payment_dto(existing)}
+
     payment = Payment(
         user_id=user.id, provider=provider.name, plan_code=plan.code, period=period, kind=quote.kind,
         amount=quote.amount, plan_price=quote.price, status="pending", idempotency_key=uuid.uuid4().hex,

@@ -11,7 +11,7 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 
 def _upgrade() -> None:
     cfg = Config(str(BACKEND_DIR / "alembic.ini"))
-    cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
+    cfg.set_main_option("script_location", str(BACKEND_DIR / "db_migrations"))
     command.upgrade(cfg, "head")
 
 
