@@ -22,10 +22,21 @@ log = logging.getLogger("flowmind")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    if settings.auto_migrate:
-        await run_migrations()
-    async with async_session() as db:
-        await run_seed(db)
+    # Миграции и seed не должны убивать весь процесс: на Render free Postgres
+    # иногда недоступна при cold start — лучше отдать 503 на /health, чем 502 на всё.
+    for attempt in range(1, 6):
+        try:
+            if settings.auto_migrate:
+                await run_migrations()
+            async with async_session() as db:
+                await run_seed(db)
+            break
+        except Exception as exc:
+            log.exception("startup DB init failed (attempt %s/5): %s", attempt, exc)
+            if attempt == 5:
+                log.error("Продолжаю без успешной инициализации БД — /api/health вернёт 503")
+            else:
+                await asyncio.sleep(min(2 ** attempt, 15))
     if settings.is_cloud and settings.secret_key == "dev-insecure-change-me":
         log.warning("SECRET_KEY не задан — используется небезопасное значение по умолчанию!")
     scheduler = asyncio.create_task(scheduler_loop())

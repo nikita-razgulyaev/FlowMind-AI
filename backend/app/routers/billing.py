@@ -1,3 +1,4 @@
+import asyncio
 import re
 from datetime import datetime
 from typing import Optional
@@ -136,6 +137,20 @@ def _validate_card(card: CardIn) -> str:
     return number
 
 
+async def _complete_mock_payment_later(payment_id: int, method_id: str | None, label: str | None, delay_sec: float = 10.0) -> None:
+    """Фоновая имитация: через delay_sec pending → succeeded + активация подписки."""
+    await asyncio.sleep(delay_sec)
+    from ..database import async_session
+    try:
+        async with async_session() as db:
+            p = await db.get(Payment, payment_id)
+            if p is None or p.status != "pending":
+                return
+            await billing.finalize_success(db, p, method_id, label)
+    except Exception:
+        pass
+
+
 @router.post("/billing/mock/{payment_id}/pay")
 async def mock_pay_endpoint(payment_id: int, card: CardIn, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     _require_mock()
@@ -147,7 +162,11 @@ async def mock_pay_endpoint(payment_id: int, card: CardIn, user: User = Depends(
     method_id, label = mock_pay.method_for_card(number)
     p.meta = {**(p.meta or {}), "card": {"brand": mock_pay.card_brand(number), "last4": number[-4:]}}      # номер целиком не храним
     if status == "succeeded":
-        await billing.finalize_success(db, p, method_id, label)
+        # Не дублируем оплату: оставляем pending и через 10 с переводим в paid + выдаём подписку
+        p.meta = {**(p.meta or {}), "pm": [method_id, label], "mock_scheduled": True}
+        await db.commit()
+        await db.refresh(p)
+        asyncio.create_task(_complete_mock_payment_later(p.id, method_id, label, 10.0))
     elif status == "requires_action":
         p.status = "requires_action"
         p.meta = {**p.meta, "pm": [method_id, label]}
@@ -170,7 +189,11 @@ async def mock_confirm_3ds(payment_id: int, data: ThreeDsIn, user: User = Depend
         raise HTTPException(400, detail={"code": "bad_state", "message": "Подтверждение не требуется"})
     if data.approve:
         method_id, label = (p.meta or {}).get("pm", [None, None])
-        await billing.finalize_success(db, p, method_id, label)
+        p.status = "pending"
+        p.meta = {**(p.meta or {}), "pm": [method_id, label], "mock_scheduled": True}
+        await db.commit()
+        await db.refresh(p)
+        asyncio.create_task(_complete_mock_payment_later(p.id, method_id, label, 10.0))
     else:
         p.status, p.failure_reason = "failed", "3-D Secure не пройден"
         await db.commit()

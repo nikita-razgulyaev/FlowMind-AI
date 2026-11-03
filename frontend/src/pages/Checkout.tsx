@@ -95,7 +95,29 @@ export default function Checkout() {
         setPayment(paid);
         if (paid.status === "requires_action") return setStage("3ds");
         if (paid.status === "succeeded") return finish(t("checkout.doneSuccess"));
+        if (paid.status === "pending") {
+            // mock: оплата принята, статус станет succeeded через ~10 с — ждём, не создаём новый платёж
+            return waitForPayment(paid.id);
+        }
         setError(paid.failure_reason ?? t("checkout.declined"));
+        setStage("failed");
+    };
+
+    const waitForPayment = async (paymentId: number) => {
+        setStage("processing");
+        const deadline = Date.now() + 20000;
+        while (Date.now() < deadline) {
+            await new Promise((r) => setTimeout(r, 1500));
+            const { data } = await api.getPayment(paymentId);
+            if (!data) continue;
+            setPayment(data);
+            if (data.status === "succeeded") return finish(t("checkout.doneSuccess"));
+            if (data.status === "failed" || data.status === "canceled") {
+                setError(data.failure_reason ?? t("checkout.declined"));
+                return setStage("failed");
+            }
+        }
+        setError(t("checkout.paymentTimeout") ?? "Платёж ещё обрабатывается. Обновите страницу через минуту.");
         setStage("failed");
     };
 
@@ -103,8 +125,14 @@ export default function Checkout() {
         if (!payment) return;
         setStage("processing");
         const { data, error: err } = await api.mockConfirm3ds(payment.id, approve);
-        if (data?.status === "succeeded") return finish(t("checkout.doneSuccess"));
-        setError(data?.failure_reason ?? err ?? t("checkout.declined"));
+        if (!data) {
+            setError(err ?? t("errors.unknown"));
+            return setStage("failed");
+        }
+        setPayment(data);
+        if (data.status === "succeeded") return finish(t("checkout.doneSuccess"));
+        if (data.status === "pending") return waitForPayment(data.id);
+        setError(data.failure_reason ?? err ?? t("checkout.declined"));
         setStage("failed");
     };
 

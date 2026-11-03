@@ -9,6 +9,7 @@ import {
     addEdge,
     useNodesState,
     useEdgesState,
+    useReactFlow,
     type Node,
     type Edge,
     type Connection,
@@ -65,7 +66,11 @@ function defaultConfig(type: string): Record<string, any> {
                 mode: settings.defaultMode,
             };
         case "telegram_trigger":
-            return { connection_id: undefined, allowed_chat_ids: "", only_commands: false };
+            return {
+                connection_id: undefined,
+                allowed_chat_ids: "",
+                only_commands: false,
+            };
         case "http":
             return { method: "GET", url: "" };
         case "telegram_send":
@@ -111,27 +116,43 @@ function toFlowNode(n: WorkflowNode, index: number): Node {
     return {
         id: n.id,
         type: n.type,
+        // Горизонтальная цепочка — ноды не переносятся на следующую строку
         position: n.position || {
-            x: 80 + (index % 3) * 300,
-            y: 80 + Math.floor(index / 3) * 180,
+            x: 80 + index * 320,
+            y: 120,
         },
         data: { config: n.config },
     };
 }
 
 function toFlowEdge(e: WorkflowEdge): Edge {
+    const isTool = e.type === "tool";
     return {
         id: e.id,
         source: e.from_node,
         target: e.to_node,
-        sourceHandle: e.type === "tool" ? "out-tool" : "out-next",
-        animated: e.type === "tool",
-        style:
-            e.type === "tool"
-                ? { stroke: "#6366f1", strokeDasharray: "4 3" }
-                : { stroke: "#3b82f6" },
-        label: e.type === "tool" ? "tool" : undefined,
+        // Явные id handle'ов — без targetHandle React Flow не рисует линию к ноде с id="in"
+        sourceHandle: isTool ? "out-tool" : "out-next",
+        targetHandle: "in",
+        animated: isTool,
+        style: isTool
+            ? { stroke: "#6366f1", strokeDasharray: "4 3" }
+            : { stroke: "#3b82f6" },
+        label: isTool ? "tool" : undefined,
     };
+}
+
+/** После загрузки нод подгоняет зум так, чтобы весь граф был на экране. */
+function FitViewOnLoad({ nodeCount }: { nodeCount: number }) {
+    const { fitView } = useReactFlow();
+    useEffect(() => {
+        if (nodeCount <= 0) return;
+        const t = requestAnimationFrame(() => {
+            fitView({ padding: 0.2, maxZoom: 1, duration: 400 });
+        });
+        return () => cancelAnimationFrame(t);
+    }, [nodeCount, fitView]);
+    return null;
 }
 
 export default function WorkflowEditor() {
@@ -168,7 +189,9 @@ export default function WorkflowEditor() {
             setDescription(data.description);
             setIsActive(data.is_active);
             setNodes(data.nodes.map(toFlowNode));
-            setEdges(data.edges.map(toFlowEdge));
+            // edges после nodes: handles должны успеть смонтироваться
+            const mapped = (data.edges || []).map(toFlowEdge);
+            requestAnimationFrame(() => setEdges(mapped));
         }
     };
 
@@ -184,8 +207,8 @@ export default function WorkflowEditor() {
             id: newId,
             type,
             position: {
-                x: 80 + (count % 3) * 300,
-                y: 80 + Math.floor(count / 3) * 180,
+                x: 80 + count * 320,
+                y: 120,
             },
             data: { config: defaultConfig(type) },
         };
@@ -200,6 +223,8 @@ export default function WorkflowEditor() {
                 addEdge(
                     {
                         ...connection,
+                        sourceHandle: connection.sourceHandle || "out-next",
+                        targetHandle: connection.targetHandle || "in",
                         animated: isTool,
                         style: isTool
                             ? { stroke: "#6366f1", strokeDasharray: "4 3" }
@@ -259,7 +284,8 @@ export default function WorkflowEditor() {
 
     const applyAiGraph = (graph: { nodes: any[]; edges: any[] }) => {
         setNodes(graph.nodes.map(toFlowNode));
-        setEdges(graph.edges.map(toFlowEdge));
+        const mapped = (graph.edges || []).map(toFlowEdge);
+        requestAnimationFrame(() => setEdges(mapped));
         setSelectedId(null);
     };
 
@@ -279,19 +305,24 @@ export default function WorkflowEditor() {
         setIsLoading(false);
     };
 
-    const handleExecute = async () => {
-        if (!isEditing) {
-            alert("Сохрани workflow перед запуском");
-            return;
-        }
-        setShowRunDialog(true);
+    const workflowNeedsInput = () => {
+        // Модалка только если есть manual-триггер или в конфигах явно используется {input}
+        const hasManual = nodes.some((n) => n.type === "manual");
+        if (hasManual) return true;
+        const usesInput = nodes.some((n) => {
+            const cfg = (n.data?.config as Record<string, any>) || {};
+            return Object.values(cfg).some(
+                (v) => typeof v === "string" && v.includes("{input}"),
+            );
+        });
+        return usesInput;
     };
 
-    const confirmExecute = async () => {
+    const runWorkflow = async (input: string) => {
         setShowRunDialog(false);
         setRunStatus("Выполняется...");
         const { data, error } = await api.executeWorkflow(Number(id), {
-            input: runInput,
+            input,
         });
         if (data) {
             setRunStatus(
@@ -302,7 +333,7 @@ export default function WorkflowEditor() {
             );
             if (execData) {
                 setLastExecution({
-                    triggerInput: runInput,
+                    triggerInput: input,
                     logs: execData.logs || [],
                 });
                 setShowAiChat(false);
@@ -310,6 +341,24 @@ export default function WorkflowEditor() {
             }
         }
         if (error) setRunStatus(`Ошибка: ${error}`);
+    };
+
+    const handleExecute = async () => {
+        if (!isEditing) {
+            alert("Сохрани workflow перед запуском");
+            return;
+        }
+        if (workflowNeedsInput()) {
+            setRunInput("");
+            setShowRunDialog(true);
+            return;
+        }
+        // Telegram / schedule и т.п. — запускаем без модалки, input не подставляем
+        await runWorkflow("");
+    };
+
+    const confirmExecute = async () => {
+        await runWorkflow(runInput);
     };
 
     return (
@@ -345,7 +394,9 @@ export default function WorkflowEditor() {
                                 <input
                                     type="checkbox"
                                     checked={isActive}
-                                    onChange={(e) => setIsActive(e.target.checked)}
+                                    onChange={(e) =>
+                                        setIsActive(e.target.checked)
+                                    }
                                 />
                                 Активен
                             </label>
@@ -424,9 +475,16 @@ export default function WorkflowEditor() {
                                 onPaneClick={() => setSelectedId(null)}
                                 deleteKeyCode={["Backspace", "Delete"]}
                                 fitView
-                                fitViewOptions={{ maxZoom: 1, padding: 0.4 }}
-                                minZoom={0.2}
+                                fitViewOptions={{
+                                    maxZoom: 1,
+                                    minZoom: 0.15,
+                                    padding: 0.25,
+                                }}
+                                minZoom={0.1}
+                                maxZoom={1.5}
+                                proOptions={{ hideAttribution: true }}
                             >
+                                <FitViewOnLoad nodeCount={nodes.length} />
                                 <Background gap={20} />
                                 <Controls />
                                 <MiniMap

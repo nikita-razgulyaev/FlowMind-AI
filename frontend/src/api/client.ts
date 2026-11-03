@@ -24,7 +24,7 @@ export function setSessionLostHandler(handler: () => void) {
     onSessionLost = handler;
 }
 
-function extractError(data: any): { message: string; code?: string } {
+function extractError(data: any, status?: number): { message: string; code?: string } {
     const detail = data?.detail;
     if (typeof detail === "string") return { message: detail };
     if (detail && typeof detail === "object" && !Array.isArray(detail)) {
@@ -37,6 +37,16 @@ function extractError(data: any): { message: string; code?: string } {
         return { message: `${field ? field + ": " : ""}${first.msg ?? "Некорректные данные"}`, code: "validation_error" };
     }
     if (typeof data?.error === "string") return { message: data.error };
+    // 502/503/504 от прокси (Render, Caddy) — тело часто HTML или пустое
+    if (status === 502 || status === 503 || status === 504) {
+        return {
+            message: "Сервер временно недоступен. Подождите 30–60 секунд и обновите страницу (на бесплатном тарифе сервис «засыпает» после простоя).",
+            code: "server_unavailable",
+        };
+    }
+    if (status !== undefined && status >= 500) {
+        return { message: "Внутренняя ошибка сервера. Попробуйте ещё раз через минуту.", code: "server_error" };
+    }
     return { message: "Неизвестная ошибка" };
 }
 
@@ -87,7 +97,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}, retry = t
     }
 
     if (!response.ok) {
-        const { message, code } = extractError(data);
+        const { message, code } = extractError(data, response.status);
         return { data: null as any, error: message, code, status: response.status };
     }
     return { data, status: response.status };
@@ -141,6 +151,8 @@ class ApiClient {
         return request<Workflow>(`/workflows/${id}`, json("PUT", workflow));
     }
     deleteWorkflow(id: number) { return request<{ message: string }>(`/workflows/${id}`, json("DELETE")); }
+    bulkDeleteWorkflows(ids: number[]) { return request<{ deleted: number }>("/workflows/bulk-delete", json("POST", { ids })); }
+    bulkDeleteExecutions(ids: number[]) { return request<{ deleted: number }>("/executions/bulk-delete", json("POST", { ids })); }
     executeWorkflow(id: number, triggerData?: Record<string, any>) {
         return request<{ execution_id: number; status: string; result: any }>(
             `/workflows/${id}/execute`, json("POST", triggerData || {}));

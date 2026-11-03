@@ -372,7 +372,7 @@ FlowMind-AI/
 │   │   ├── routers/             # auth, me, workflows, connections, billing, telegram, ai, admin, system
 │   │   ├── services/            # limits, billing, runner, llm, telegram_service, ai_assistant, ssrf, safe_eval, ...
 │   │   └── payments/            # PaymentProvider: mock, yookassa
-│   ├── alembic/                 # миграции БД
+│   ├── db_migrations/           # миграции БД (Alembic)
 │   ├── tests/
 │   ├── requirements.txt, requirements-dev.txt, .env.example
 ├── frontend/

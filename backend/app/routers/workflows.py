@@ -3,6 +3,7 @@ from datetime import timedelta
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -122,6 +123,39 @@ async def delete_workflow(workflow_id: int, user: User = Depends(get_current_use
     return {"message": "Workflow deleted"}
 
 
+class IdsIn(BaseModel):
+    ids: list[int]
+
+
+@router.post("/workflows/bulk-delete")
+async def bulk_delete_workflows(data: IdsIn, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    ids = list({int(i) for i in data.ids if i})
+    if not ids:
+        return {"deleted": 0}
+    rows = (await db.execute(select(Workflow).where(Workflow.user_id == user.id, Workflow.id.in_(ids)))).scalars().all()
+    had_tg = False
+    for wf in rows:
+        had_tg = had_tg or wf.has_telegram_trigger
+        await db.execute(delete(Execution).where(Execution.workflow_id == wf.id, Execution.user_id == user.id))
+        await db.delete(wf)
+    await db.commit()
+    if had_tg:
+        await telegram_service.sync_user_webhooks(db, user.id)
+    return {"deleted": len(rows)}
+
+
+@router.post("/executions/bulk-delete")
+async def bulk_delete_executions(data: IdsIn, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    ids = list({int(i) for i in data.ids if i})
+    if not ids:
+        return {"deleted": 0}
+    result = await db.execute(
+        delete(Execution).where(Execution.user_id == user.id, Execution.id.in_(ids))
+    )
+    await db.commit()
+    return {"deleted": result.rowcount or 0}
+
+
 @router.post("/workflows/{workflow_id}/execute")
 async def execute_workflow(workflow_id: int, trigger_data: Optional[Dict[str, Any]] = None,
                            user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
@@ -143,7 +177,10 @@ async def create_from_template(template_id: str, user: User = Depends(get_curren
     if not template:
         raise HTTPException(404, "Template not found")
     nodes = copy.deepcopy(template["nodes"])
-    for node in nodes:
+    for i, node in enumerate(nodes):
+        # Горизонтальная цепочка — без переноса на следующую строку
+        if not node.get("position"):
+            node["position"] = {"x": 80 + i * 320, "y": 120}
         cfg = node.get("config", {})
         if node["type"] in ("llm", "agent") and settings.is_local and cfg.get("mode") == "cloud" and not cfg.get("connection_id"):
             cfg["mode"], cfg["model"] = "local", settings.ollama_model     # в локальной версии шаблоны работают на Ollama
