@@ -1,4 +1,5 @@
-import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { useEffect } from "react";
+import { Handle, Position, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 import {
     Play,
     Clock,
@@ -11,7 +12,34 @@ import {
     Table,
     CalendarPlus,
     MessageCircle,
+    Webhook,
+    Split,
+    Variable,
 } from "lucide-react";
+
+/** Префикс id source-handle ветки: `out-c:<метка>`; метка попадает в edge.condition. */
+export const BRANCH_HANDLE_PREFIX = "out-c:";
+
+export function parseCases(raw: unknown): string[] {
+    return String(raw ?? "")
+        .split(/[,\n]/)
+        .map((c) => c.trim())
+        .filter(Boolean);
+}
+
+/** Выходные ветки ноды: Condition — true/false, Switch — cases + default. */
+export function getBranches(type: string, config: Record<string, any>): string[] {
+    if (type === "condition") return ["true", "false"];
+    if (type === "switch") return [...parseCases(config.cases), "default"];
+    return [];
+}
+
+export function branchColor(label: string): string {
+    if (label === "true") return "#16a34a";
+    if (label === "false") return "#dc2626";
+    if (label === "default") return "#6b7280";
+    return "#d97706";
+}
 
 export const NODE_META: Record<
     string,
@@ -77,6 +105,24 @@ export const NODE_META: Record<
         badge: "bg-green-100 text-green-700",
         ring: "border-green-200",
     },
+    webhook: {
+        label: "Webhook",
+        icon: Webhook,
+        badge: "bg-pink-100 text-pink-700",
+        ring: "border-pink-200",
+    },
+    switch: {
+        label: "Switch",
+        icon: Split,
+        badge: "bg-amber-100 text-amber-700",
+        ring: "border-amber-200",
+    },
+    set: {
+        label: "Set",
+        icon: Variable,
+        badge: "bg-teal-100 text-teal-700",
+        ring: "border-teal-200",
+    },
     google_calendar_create_event: {
         label: "Google Calendar",
         icon: CalendarPlus,
@@ -98,6 +144,14 @@ function preview(type: string, config: Record<string, any>): string {
             );
         case "condition":
             return config.expression || "True";
+        case "switch":
+            return config.value || "{input}";
+        case "set":
+            return config.values || "key=value";
+        case "schedule":
+            return `каждые ${config.interval_minutes || 60} мин`;
+        case "webhook":
+            return "HTTP-вызов URL воркфлоу";
         case "print":
             return config.value || "{last_result}";
         case "agent":
@@ -120,8 +174,14 @@ export default function CanvasNode({ id, type, data, selected }: NodeProps) {
     const Icon = meta.icon;
     const config = (data?.config as Record<string, any>) || {};
     const text = preview(type as string, config);
-    const isTrigger = type === "manual" || type === "schedule" || type === "telegram_trigger";
+    const isTrigger =
+        type === "manual" || type === "schedule" || type === "telegram_trigger" || type === "webhook";
     const isAgent = type === "agent";
+    const branches = getBranches(type as string, config);
+    const updateNodeInternals = useUpdateNodeInternals();
+    useEffect(() => {
+        updateNodeInternals(id);
+    }, [id, branches.join("|"), updateNodeInternals]);
 
     return (
         <div
@@ -161,13 +221,44 @@ export default function CanvasNode({ id, type, data, selected }: NodeProps) {
                 </div>
             )}
 
-            <Handle
-                type="source"
-                position={Position.Right}
-                id="out-next"
-                style={isAgent ? { top: "38%" } : undefined}
-                className="!w-2.5 !h-2.5 !bg-blue-500"
-            />
+            {branches.length > 0 ? (
+                <>
+                    {/* скрытый handle: на нём держатся старые связи Condition без метки ветки */}
+                    <Handle
+                        type="source"
+                        position={Position.Right}
+                        id="out-next"
+                        isConnectable={false}
+                        className="!opacity-0 !pointer-events-none"
+                    />
+                    <div className="pb-1 border-t border-gray-100">
+                        {branches.map((branch) => (
+                            <div
+                                key={branch}
+                                className="relative h-6 pr-4 text-right text-[11px] font-medium leading-6"
+                                style={{ color: branchColor(branch) }}
+                            >
+                                {branch}
+                                <Handle
+                                    type="source"
+                                    position={Position.Right}
+                                    id={`${BRANCH_HANDLE_PREFIX}${branch}`}
+                                    style={{ background: branchColor(branch) }}
+                                    className="!w-2.5 !h-2.5"
+                                />
+                            </div>
+                        ))}
+                    </div>
+                </>
+            ) : (
+                <Handle
+                    type="source"
+                    position={Position.Right}
+                    id="out-next"
+                    style={isAgent ? { top: "38%" } : undefined}
+                    className="!w-2.5 !h-2.5 !bg-blue-500"
+                />
+            )}
 
             {isAgent && (
                 <Handle

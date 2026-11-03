@@ -210,7 +210,7 @@ class Execution(Base):
     user_id = Column(Integer, nullable=True, index=True)
     workflow_id = Column(Integer, nullable=False)
     status = Column(String, default="pending")
-    source = Column(String(20), default="manual")                         # manual | telegram
+    source = Column(String(20), default="manual")                         # manual | telegram | webhook | schedule
     is_ai = Column(Boolean, default=False, nullable=False)
     trigger_data = Column(JSON, nullable=True)
     result = Column(JSON, nullable=True)

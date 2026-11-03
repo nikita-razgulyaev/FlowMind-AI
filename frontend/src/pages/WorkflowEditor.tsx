@@ -18,7 +18,7 @@ import "@xyflow/react/dist/style.css";
 import { Save, Play, Sparkles, Terminal } from "lucide-react";
 import { api } from "../api/client";
 import type { WorkflowNode, WorkflowEdge } from "../types/workflow";
-import CanvasNode, { NODE_META } from "../components/canvas/CanvasNode";
+import CanvasNode, { NODE_META, BRANCH_HANDLE_PREFIX, branchColor } from "../components/canvas/CanvasNode";
 import NodeConfigPanel from "../components/canvas/NodeConfigPanel";
 import EditorSidebar from "../components/canvas/EditorSidebar";
 import ChatLogPanel from "../components/canvas/ChatLogPanel";
@@ -37,11 +37,16 @@ const nodeTypes = {
     telegram_send: CanvasNode,
     google_sheets_append: CanvasNode,
     google_calendar_create_event: CanvasNode,
+    webhook: CanvasNode,
+    switch: CanvasNode,
+    set: CanvasNode,
 };
 
 const PALETTE: { type: string }[] = [
     { type: "manual" },
     { type: "telegram_trigger" },
+    { type: "webhook" },
+    { type: "schedule" },
     { type: "http" },
     { type: "telegram_send" },
     { type: "google_sheets_append" },
@@ -49,6 +54,8 @@ const PALETTE: { type: string }[] = [
     { type: "llm" },
     { type: "agent" },
     { type: "condition" },
+    { type: "switch" },
+    { type: "set" },
     { type: "print" },
 ];
 
@@ -70,6 +77,8 @@ function defaultConfig(type: string): Record<string, any> {
                 connection_id: undefined,
                 allowed_chat_ids: "",
                 only_commands: false,
+                test_input: "",
+                test_chat_id: "",
             };
         case "http":
             return { method: "GET", url: "" };
@@ -107,6 +116,16 @@ function defaultConfig(type: string): Record<string, any> {
             };
         case "condition":
             return { expression: "" };
+        case "switch":
+            return { value: "{input}", cases: "" };
+        case "set":
+            return { values: "" };
+        case "schedule":
+            return { interval_minutes: 60, test_input: "" };
+        case "webhook":
+            return { test_input: "" };
+        case "manual":
+            return { test_input: "" };
         default:
             return {};
     }
@@ -125,20 +144,30 @@ function toFlowNode(n: WorkflowNode, index: number): Node {
     };
 }
 
+/** Стиль связи по типу: tool — пунктир, ветка Condition/Switch — цвет и подпись метки. */
+function edgeStyle(kind: "tool" | "branch" | "next", label?: string) {
+    if (kind === "tool") return { stroke: "#6366f1", strokeDasharray: "4 3" };
+    if (kind === "branch") return { stroke: branchColor(label || "") };
+    return { stroke: "#3b82f6" };
+}
+
 function toFlowEdge(e: WorkflowEdge): Edge {
     const isTool = e.type === "tool";
+    const isBranch = !isTool && !!e.condition;
     return {
         id: e.id,
         source: e.from_node,
         target: e.to_node,
         // Явные id handle'ов — без targetHandle React Flow не рисует линию к ноде с id="in"
-        sourceHandle: isTool ? "out-tool" : "out-next",
+        sourceHandle: isTool
+            ? "out-tool"
+            : isBranch
+              ? `${BRANCH_HANDLE_PREFIX}${e.condition}`
+              : "out-next",
         targetHandle: "in",
         animated: isTool,
-        style: isTool
-            ? { stroke: "#6366f1", strokeDasharray: "4 3" }
-            : { stroke: "#3b82f6" },
-        label: isTool ? "tool" : undefined,
+        style: edgeStyle(isTool ? "tool" : isBranch ? "branch" : "next", e.condition),
+        label: isTool ? "tool" : e.condition,
     };
 }
 
@@ -166,8 +195,6 @@ export default function WorkflowEditor() {
     const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
-    const [showRunDialog, setShowRunDialog] = useState(false);
-    const [runInput, setRunInput] = useState("");
     const [runStatus, setRunStatus] = useState<string | null>(null);
     const [showLog, setShowLog] = useState(false);
     const [showAiChat, setShowAiChat] = useState(false);
@@ -218,18 +245,20 @@ export default function WorkflowEditor() {
 
     const onConnect = useCallback(
         (connection: Connection) => {
-            const isTool = connection.sourceHandle === "out-tool";
+            const handle = connection.sourceHandle || "out-next";
+            const isTool = handle === "out-tool";
+            const branch = handle.startsWith(BRANCH_HANDLE_PREFIX)
+                ? handle.slice(BRANCH_HANDLE_PREFIX.length)
+                : undefined;
             setEdges((eds) =>
                 addEdge(
                     {
                         ...connection,
-                        sourceHandle: connection.sourceHandle || "out-next",
+                        sourceHandle: handle,
                         targetHandle: connection.targetHandle || "in",
                         animated: isTool,
-                        style: isTool
-                            ? { stroke: "#6366f1", strokeDasharray: "4 3" }
-                            : { stroke: "#3b82f6" },
-                        label: isTool ? "tool" : undefined,
+                        style: edgeStyle(isTool ? "tool" : branch ? "branch" : "next", branch),
+                        label: isTool ? "tool" : branch,
                     },
                     eds,
                 ),
@@ -277,6 +306,9 @@ export default function WorkflowEditor() {
                 from_node: e.source,
                 to_node: e.target,
                 type: e.sourceHandle === "out-tool" ? "tool" : "next",
+                condition: e.sourceHandle?.startsWith(BRANCH_HANDLE_PREFIX)
+                    ? e.sourceHandle.slice(BRANCH_HANDLE_PREFIX.length)
+                    : undefined,
             }),
         ),
         is_active: isActive,
@@ -305,24 +337,11 @@ export default function WorkflowEditor() {
         setIsLoading(false);
     };
 
-    const workflowNeedsInput = () => {
-        // Модалка только если есть manual-триггер или в конфигах явно используется {input}
-        const hasManual = nodes.some((n) => n.type === "manual");
-        if (hasManual) return true;
-        const usesInput = nodes.some((n) => {
-            const cfg = (n.data?.config as Record<string, any>) || {};
-            return Object.values(cfg).some(
-                (v) => typeof v === "string" && v.includes("{input}"),
-            );
-        });
-        return usesInput;
-    };
-
-    const runWorkflow = async (input: string) => {
-        setShowRunDialog(false);
+    /** Run без модалки: тестовые данные берутся из настроек триггера (поле «Тестовые данные»). */
+    const runWorkflow = async () => {
         setRunStatus("Выполняется...");
         const { data, error } = await api.executeWorkflow(Number(id), {
-            input,
+            input: "",
         });
         if (data) {
             setRunStatus(
@@ -333,7 +352,7 @@ export default function WorkflowEditor() {
             );
             if (execData) {
                 setLastExecution({
-                    triggerInput: input,
+                    triggerInput: execData.trigger_data?.input || "",
                     logs: execData.logs || [],
                 });
                 setShowAiChat(false);
@@ -348,17 +367,7 @@ export default function WorkflowEditor() {
             alert("Сохрани workflow перед запуском");
             return;
         }
-        if (workflowNeedsInput()) {
-            setRunInput("");
-            setShowRunDialog(true);
-            return;
-        }
-        // Telegram / schedule и т.п. — запускаем без модалки, input не подставляем
-        await runWorkflow("");
-    };
-
-    const confirmExecute = async () => {
-        await runWorkflow(runInput);
+        await runWorkflow();
     };
 
     return (
@@ -524,6 +533,7 @@ export default function WorkflowEditor() {
                                             any
                                         >) || {},
                                 }}
+                                workflowId={isEditing ? Number(id) : undefined}
                                 onChange={updateSelectedConfig}
                                 onDelete={deleteSelected}
                                 onClose={() => setSelectedId(null)}
@@ -538,42 +548,6 @@ export default function WorkflowEditor() {
                         logs={lastExecution?.logs || []}
                         onClose={() => setShowLog(false)}
                     />
-                )}
-
-                {showRunDialog && (
-                    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-                        <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-5">
-                            <h3 className="text-sm font-semibold text-gray-800 mb-1">
-                                Тестовый запуск
-                            </h3>
-                            <p className="text-xs text-gray-400 mb-3">
-                                Это значение попадёт в {"{input}"} — например,
-                                вопрос пользователя.
-                            </p>
-                            <textarea
-                                autoFocus
-                                value={runInput}
-                                onChange={(e) => setRunInput(e.target.value)}
-                                rows={3}
-                                placeholder="Где мой заказ 5?"
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                            />
-                            <div className="flex justify-end gap-2 mt-4">
-                                <button
-                                    onClick={() => setShowRunDialog(false)}
-                                    className="px-3 py-1.5 text-sm text-gray-500 hover:bg-gray-50 rounded-lg"
-                                >
-                                    Отмена
-                                </button>
-                                <button
-                                    onClick={confirmExecute}
-                                    className="px-4 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium"
-                                >
-                                    Запустить
-                                </button>
-                            </div>
-                        </div>
-                    </div>
                 )}
             </div>
         </div>

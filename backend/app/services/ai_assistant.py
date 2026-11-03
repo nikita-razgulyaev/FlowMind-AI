@@ -14,7 +14,11 @@ telegram_trigger — запуск входящим сообщением в Teleg
 llm — один запрос к языковой модели. config: {"mode": "cloud|local", "model": "", "prompt": "текст, можно {input} и {id_другой_ноды}", "temperature": 0.7, "connection_id": null}
 agent — AI-агент с инструментами. config: {"mode": "cloud|local", "model": "", "system_prompt": "...", "prompt": "{input}", "max_iterations": 5, "temperature": 0.3, "connection_id": null}
 http — HTTP-запрос. config: {"method": "GET|POST", "url": "https://... (можно {input})"}
-condition — условие. config: {"expression": "python-выражение, например len(input) > 5"}
+condition — условие с двумя ветками. config: {"expression": "python-выражение, можно {node.field}, например {extract.score} >= 7"}. Исходящие рёбра обязаны иметь "condition": "true" или "false" — выполнится только выбранная ветка.
+switch — выбор ветки по значению. config: {"value": "{classify}", "cases": "support, sales, complaint"}. Рёбра имеют "condition" = одно из значений cases или "default".
+set — именованные значения. config: {"values": "key=значение (по строке на ключ)"}; доступны как {set_1.key}.
+webhook — запуск внешним HTTP-вызовом (триггер). config: {}; тело запроса: {webhook.body.поле}.
+schedule — запуск по интервалу (триггер). config: {"interval_minutes": 60}.
 print — вывод результата. config: {"value": "{id_ноды}"}
 telegram_send — отправка сообщения в Telegram. config: {"connection_id": <id>, "chat_id": "" (пусто = ответ в чат триггера), "message": "текст"}
 google_sheets_append — добавить строку в Google Таблицу. config: {"connection_id": <id>, "spreadsheet_id": "", "range": "A1", "values": "a, b, c"}
@@ -22,9 +26,9 @@ google_calendar_create_event — создать событие. config: {"connec
 
 ALLOWED_TYPES = {
     "manual", "telegram_trigger", "llm", "agent", "http", "condition", "print", "telegram_send",
-    "google_sheets_append", "google_calendar_create_event",
+    "google_sheets_append", "google_calendar_create_event", "switch", "set", "webhook", "schedule",
 }
-TRIGGERS = {"manual", "telegram_trigger"}
+TRIGGERS = {"manual", "telegram_trigger", "webhook", "schedule"}
 MAX_HISTORY = 10
 
 
@@ -41,7 +45,8 @@ def build_system_prompt(current: Optional[dict], connections: list[dict]) -> str
 - Рёбра типа "next" задают порядок выполнения слева направо: {{"id":"e1","from_node":"a","to_node":"b","type":"next"}}.
 - У агента (agent) инструменты подключаются рёбрами типа "tool" ОТ агента К ноде-инструменту. Ноде-инструменту добавь в config: "tool_name" (латиница, snake_case), "tool_description" и "tool_parameters" (JSON Schema: {{"type":"object","properties":{{...}},"required":[...]}}).
 - Ноды-инструменты не соединяй рёбрами "next".
-- Начинай граф с триггера (manual или telegram_trigger). id нод — короткие латинские, например "trigger_1", "agent_1".
+- Значения нод доступны как {{id_ноды}} и по JSON-пути {{id_ноды.поле}}. Чтобы LLM-нода вернула поля, проси её ответить JSON-объектом.
+- Начинай граф с триггера (manual, telegram_trigger, webhook или schedule). id нод — короткие латинские, например "trigger_1", "agent_1".
 - Для AI-нод (llm, agent) ставь "mode": "{default_mode}", поле "model" оставляй пустой строкой.
 - connection_id указывай ТОЛЬКО из списка подключений пользователя; если подходящего нет — null и сообщи об этом в reply.
 
@@ -65,7 +70,8 @@ def _compact(wf: Optional[dict]) -> dict:
     nodes = [{"id": n.get("id"), "type": n.get("type"),
               "config": {k: trim(v) for k, v in (n.get("config") or {}).items() if k != "tool_parameters"}}
              for n in (wf or {}).get("nodes", [])][:settings.max_nodes_per_workflow]
-    edges = [{"from_node": e.get("from_node"), "to_node": e.get("to_node"), "type": e.get("type", "next")}
+    edges = [{"from_node": e.get("from_node"), "to_node": e.get("to_node"), "type": e.get("type", "next"),
+              **({"condition": e["condition"]} if e.get("condition") else {})}
              for e in (wf or {}).get("edges", [])]
     return {"nodes": nodes, "edges": edges}
 
@@ -136,7 +142,10 @@ def sanitize_workflow(raw: Any, existing: Optional[dict], connections: list[dict
         if (src, dst, kind) in pairs:
             continue
         pairs.add((src, dst, kind))
-        edges.append({"id": str(e.get("id") or f"edge_{i + 1}"), "from_node": src, "to_node": dst, "type": kind})
+        edge = {"id": str(e.get("id") or f"edge_{i + 1}"), "from_node": src, "to_node": dst, "type": kind}
+        if e.get("condition") and kind == "next":
+            edge["condition"] = str(e["condition"])
+        edges.append(edge)
 
     for e in edges:                                     # ноды-инструменты должны быть описаны для модели
         if e["type"] == "tool":

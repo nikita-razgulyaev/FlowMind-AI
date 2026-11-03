@@ -1,6 +1,7 @@
 """Движок выполнения workflow: топологический порядок, agent-loop с tool calling, обработчики нод."""
 import asyncio
 import json
+import re
 from datetime import datetime, timezone
 
 import httpx
@@ -11,6 +12,58 @@ from .services.safe_eval import safe_eval
 from .services.ssrf import assert_public_url
 
 MAX_HTTP_REDIRECTS = 3
+MAX_RENDER_CHARS = 4000                     # длина одного подставляемого значения {node}
+MAX_HTTP_JSON_CHARS = 20000                 # ответ HTTP разбирается в json, только если он не больше
+TRIGGER_TYPES = ("manual", "telegram_trigger", "webhook", "schedule")
+BRANCH_TRIGGER_KEYS = ("telegram", "webhook", "schedule")     # признаки «боевого» запуска (не кнопка Run)
+
+# {name}, {name.field}, {name.items[0].title} — путь по JSON-выводу ноды
+PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][\w\-]*)((?:\.[\w\-]+|\[\d+\])*)\}")
+PATH_PART_RE = re.compile(r"\.([\w\-]+)|\[(\d+)\]")
+
+
+def loose_json(value):
+    """Достаёт JSON-объект из значения: dict как есть, из строки — первый блок {...} (LLM любят оборачивать JSON в текст)."""
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str):
+        return None
+    start, end = value.find("{"), value.rfind("}")
+    if start == -1 or end <= start:
+        return None
+    try:
+        parsed = json.loads(value[start:end + 1])
+    except ValueError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def resolve_path(value, path: str):
+    """Идёт по пути .a.b[0]. Возвращает (найдено, значение)."""
+    for key, index in PATH_PART_RE.findall(path):
+        if index:
+            if not isinstance(value, list) or int(index) >= len(value):
+                return False, None
+            value = value[int(index)]
+            continue
+        container = value if isinstance(value, (dict, list)) else loose_json(value)
+        if isinstance(container, dict) and key in container:
+            value = container[key]
+        elif isinstance(container, list) and key.isdigit() and int(key) < len(container):
+            value = container[int(key)]
+        else:
+            return False, None
+    return True, value
+
+
+def render_value(value) -> str:
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str) \
+        if isinstance(value, (dict, list)) else str(value)
+    return text[:MAX_RENDER_CHARS]
+
+
+def normalize_label(text: str) -> str:
+    return re.sub(r"[^\w\s]", "", str(text).casefold()).strip()
 
 
 class WorkflowEngine:
@@ -24,6 +77,12 @@ class WorkflowEngine:
         self.llm = LLMProvider(connections=self.connections, guard=llm_guard)
         self.nodes_by_id = {n["id"]: n for n in workflow.get("nodes", [])}
         self._current_agent_id = None
+        self.executed: set[str] = set()
+        self.branches: dict[str, str] = {}          # id ветвящей ноды -> выбранная ветка ("true"/"false"/значение switch)
+        self.incoming: dict[str, list[dict]] = {}
+        for edge in workflow.get("edges", []):
+            if edge.get("type") != "tool":
+                self.incoming.setdefault(edge.get("to_node"), []).append(edge)
 
     def _get_connection(self, connection_id):
         if connection_id is None:
@@ -76,6 +135,11 @@ class WorkflowEngine:
             self.context["telegram_username"] = tg.get("username", "")
             self.context["telegram_first_name"] = tg.get("first_name", "")
 
+        webhook = trigger_data.get("webhook") if isinstance(trigger_data, dict) else None
+        if isinstance(webhook, dict):
+            self.context["webhook"] = webhook
+        self._apply_test_input(trigger_data)
+
         # Ноды, привязанные к агенту как инструменты, вызывает сам агент.
         tool_ids = set()
         for node in self.workflow["nodes"]:
@@ -88,7 +152,12 @@ class WorkflowEngine:
         for node in self._topological_order():
             if node["id"] in tool_ids:
                 continue
+            if not self._is_reachable(node["id"]):
+                self.context[node["id"]] = ""      # ветка не выбрана: {node} подставляется пустым, так работает «слияние»
+                continue
             result = await self._execute_node(node, trigger_data)
+            self.executed.add(node["id"])
+            self._register_branch(node, result)
             self.context[node["id"]] = result
             self.logs.append({
                 "node_id": node["id"],
@@ -99,10 +168,52 @@ class WorkflowEngine:
             })
         return self.context
 
+    def _apply_test_input(self, trigger_data):
+        """Кнопка Run без модалки: пустой вход заменяется тестовыми данными из настроек триггера."""
+        if not isinstance(trigger_data, dict) or any(k in trigger_data for k in BRANCH_TRIGGER_KEYS):
+            return
+        if self.context.get("input") not in ("", {}, None):
+            return
+        for node in self.workflow["nodes"]:
+            cfg = node.get("config") or {}
+            if node["type"] not in TRIGGER_TYPES or not cfg.get("test_input"):
+                continue
+            text = str(cfg["test_input"])
+            self.context["input"] = text
+            if node["type"] == "telegram_trigger":
+                self.context["telegram_text"] = text
+                self.context["telegram_chat_id"] = cfg.get("test_chat_id", "")
+            if node["type"] == "webhook":
+                self.context["webhook"] = {"body": loose_json(text) or text, "query": {}, "method": "POST"}
+            return
+
+    def _edge_is_live(self, edge) -> bool:
+        source = edge.get("from_node")
+        if source not in self.executed:
+            return False
+        label = edge.get("condition")
+        chosen = self.branches.get(source)
+        return not label or chosen is None or str(chosen) == str(label)
+
+    def _is_reachable(self, node_id) -> bool:
+        """Нода выполняется, если у неё нет входов (триггер) или хотя бы один входящий путь «живой»."""
+        incoming = self.incoming.get(node_id)
+        return not incoming or any(self._edge_is_live(e) for e in incoming)
+
+    def _register_branch(self, node, result):
+        if node["type"] == "condition":
+            self.branches[node["id"]] = "true" if result else "false"
+        elif node["type"] == "switch":
+            self.branches[node["id"]] = str(result)
+
     def _get_handler(self, node_type):
         handlers = {
             "manual": self._handle_manual,
             "telegram_trigger": self._handle_manual,
+            "webhook": self._handle_manual,
+            "schedule": self._handle_manual,
+            "switch": self._handle_switch,
+            "set": self._handle_set,
             "llm": self._handle_llm,
             "http": self._handle_http,
             "condition": self._handle_condition,
@@ -122,7 +233,30 @@ class WorkflowEngine:
         return await handler(node.get("config", {}), trigger_data)
 
     async def _handle_manual(self, config, trigger_data, extra_vars=None):
-        return trigger_data or {}
+        if isinstance(trigger_data, dict) and trigger_data.get("input") not in ("", {}, None):
+            return trigger_data
+        return {"input": self.context.get("input", "")}
+
+    async def _handle_switch(self, config, td, extra_vars=None):
+        """Выбирает ветку: совпадение значения с одним из cases (точное, затем по вхождению), иначе «default»."""
+        value = normalize_label(self._render_template(config.get("value", "{input}"), extra_vars))
+        cases = [c.strip() for c in re.split(r"[,\n]", str(config.get("cases", ""))) if c.strip()]
+        for case in cases:
+            if value == normalize_label(case):
+                return case
+        for case in cases:
+            if normalize_label(case) and normalize_label(case) in value:
+                return case
+        return "default"
+
+    async def _handle_set(self, config, td, extra_vars=None):
+        """Набор именованных значений: строки key=value, доступны как {set_1.key}."""
+        result = {}
+        for line in str(config.get("values", "")).splitlines():
+            key, separator, raw = line.partition("=")
+            if separator and key.strip():
+                result[key.strip()] = self._render_template(raw.strip(), extra_vars)
+        return result
 
     async def _handle_llm(self, config, td, extra_vars=None):
         prompt = self._render_template(config.get("prompt", ""), extra_vars)
@@ -141,15 +275,31 @@ class WorkflowEngine:
             if not url or not url.startswith(("http://", "https://")):
                 return f"HTTP Error: Invalid URL after template rendering: '{url}'. Make sure to provide a valid URL or trigger data."
 
+            headers = loose_json(self._render_template(str(config.get("headers", "")), extra_vars)) or {}
+            body = self._render_template(str(config.get("body", "")), extra_vars)
+            payload = {"json": loose_json(body)} if loose_json(body) is not None else ({"content": body} if body else {})
+            origin_host = httpx.URL(url).host
+
             async with httpx.AsyncClient(timeout=20.0, follow_redirects=False) as client:
                 for _ in range(MAX_HTTP_REDIRECTS + 1):
                     await assert_public_url(url)
-                    response = await client.request("GET" if method == "GET" else "POST", url)
+                    # заголовки (например, Authorization) не уходят на другой хост при редиректе
+                    hop_headers = headers if httpx.URL(url).host == origin_host else {}
+                    response = await client.request(
+                        "GET" if method == "GET" else "POST", url, headers={str(k): str(v) for k, v in hop_headers.items()},
+                        **({} if method == "GET" else payload),
+                    )
                     if response.is_redirect and response.headers.get("location"):
                         url = str(response.url.join(response.headers["location"]))
                         continue
                     break
-            return {"status_code": response.status_code, "body": response.text[:1000]}
+            result = {"status_code": response.status_code, "body": response.text[:1000]}
+            if len(response.text) <= MAX_HTTP_JSON_CHARS:
+                try:
+                    result["json"] = response.json()      # доступно как {http_1.json.field}
+                except ValueError:
+                    pass
+            return result
         except Exception as e:
             return f"HTTP Error: {str(e)}"
 
@@ -346,12 +496,16 @@ class WorkflowEngine:
             return {"answer": f"Agent Error: {str(e)}", "trace": trace}
 
     def _render_template(self, template, extra_vars=None):
-        result = template
+        """Подставляет {name} и {name.path.to.field} за один проход; неизвестные плейсхолдеры остаются как есть."""
         variables = dict(self.context)
         if extra_vars:
             variables.update(extra_vars)
-        for key, value in variables.items():
-            placeholder = f"{{{key}}}"
-            if placeholder in result:
-                result = result.replace(placeholder, str(value)[:500])
-        return result
+
+        def replace(match):
+            name, path = match.group(1), match.group(2)
+            if name not in variables:
+                return match.group(0)
+            found, value = (True, variables[name]) if not path else resolve_path(variables[name], path)
+            return render_value(value) if found else match.group(0)
+
+        return PLACEHOLDER_RE.sub(replace, template)

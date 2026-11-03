@@ -24,6 +24,7 @@ const input =
 
 interface Props {
     node: WorkflowNode;
+    workflowId?: number;
     onChange: (config: Record<string, any>) => void;
     onDelete: () => void;
     onClose: () => void;
@@ -82,8 +83,52 @@ function ToolSettingsFields({
     );
 }
 
+function TestInputField({
+    cfg,
+    set,
+    hint,
+}: {
+    cfg: Record<string, any>;
+    set: (patch: Record<string, any>) => void;
+    hint?: string;
+}) {
+    return (
+        <div>
+            <label className={label}>Тестовые данные для кнопки Run → {"{input}"}</label>
+            <textarea
+                value={cfg.test_input || ""}
+                onChange={(e) => set({ test_input: e.target.value })}
+                rows={4}
+                placeholder={hint || "Текст, который подставится в {input} при ручном запуске"}
+                className={input}
+            />
+        </div>
+    );
+}
+
+function WebhookUrl({ workflowId }: { workflowId?: number }) {
+    const [url, setUrl] = useState("");
+    useEffect(() => {
+        if (!workflowId) return;
+        api.getWebhookUrl(workflowId).then(({ data }) => data && setUrl(data.url));
+    }, [workflowId]);
+    if (!workflowId) {
+        return <p className="text-xs text-amber-600">Сохрани воркфлоу — появится URL вебхука.</p>;
+    }
+    return (
+        <div>
+            <label className={label}>URL вебхука (GET или POST, воркфлоу должен быть активен)</label>
+            <input readOnly value={url} onFocus={(e) => e.target.select()} className={input} />
+            <p className="text-xs text-gray-400 mt-1">
+                Тело запроса: {"{input}"} — текст, {"{webhook.body.поле}"} — поле JSON, {"{webhook.query.параметр}"} — query-параметр.
+            </p>
+        </div>
+    );
+}
+
 export default function NodeConfigPanel({
     node,
+    workflowId,
     onChange,
     onDelete,
     onClose,
@@ -272,6 +317,29 @@ export default function NodeConfigPanel({
                                 className={input}
                             />
                         </div>
+                        <div>
+                            <label className={label}>Headers (JSON, необязательно)</label>
+                            <input
+                                value={cfg.headers || ""}
+                                onChange={(e) => set({ headers: e.target.value })}
+                                placeholder='{"Authorization": "Bearer ..."}'
+                                className={input}
+                            />
+                        </div>
+                        {cfg.method === "POST" && (
+                            <div>
+                                <label className={label}>Body (JSON или текст)</label>
+                                <textarea
+                                    value={cfg.body || ""}
+                                    onChange={(e) => set({ body: e.target.value })}
+                                    rows={3}
+                                    className={input}
+                                />
+                            </div>
+                        )}
+                        <p className="text-xs text-gray-400">
+                            Ответ-JSON доступен как {"{http_1.json.поле}"}.
+                        </p>
                         <ToolSettingsFields
                             cfg={cfg}
                             set={set}
@@ -584,9 +652,56 @@ export default function NodeConfigPanel({
                             onChange={(e) =>
                                 set({ expression: e.target.value })
                             }
-                            placeholder="{http_1} > 0.5"
+                            placeholder="{extract.score} >= 7"
                             className={input}
                         />
+                        <p className="text-xs text-gray-400 mt-1">
+                            Выполнится только выбранная ветка: тяни связь от
+                            true или false. Поля JSON-вывода ноды — через{" "}
+                            {"{node.field}"}.
+                        </p>
+                    </div>
+                )}
+
+                {node.type === "switch" && (
+                    <>
+                        <div>
+                            <label className={label}>Значение</label>
+                            <input
+                                value={cfg.value || ""}
+                                onChange={(e) => set({ value: e.target.value })}
+                                placeholder="{classify}"
+                                className={input}
+                            />
+                        </div>
+                        <div>
+                            <label className={label}>Ветки (через запятую)</label>
+                            <input
+                                value={cfg.cases || ""}
+                                onChange={(e) => set({ cases: e.target.value })}
+                                placeholder="support, sales, complaint"
+                                className={input}
+                            />
+                            <p className="text-xs text-gray-400 mt-1">
+                                Сравнение без регистра и знаков препинания (допускается вхождение). Не подошло ничего — ветка default.
+                            </p>
+                        </div>
+                    </>
+                )}
+
+                {node.type === "set" && (
+                    <div>
+                        <label className={label}>Значения (key=value, по строке)</label>
+                        <textarea
+                            value={cfg.values || ""}
+                            onChange={(e) => set({ values: e.target.value })}
+                            rows={5}
+                            placeholder={"name={extract.name}\nsource=telegram"}
+                            className={input}
+                        />
+                        <p className="text-xs text-gray-400 mt-1">
+                            Дальше доступны как {"{id_ноды.key}"}.
+                        </p>
                     </div>
                 )}
 
@@ -802,13 +917,53 @@ export default function NodeConfigPanel({
                             {"{telegram_first_name}"}. Нода Telegram Send с пустым
                             chat_id отвечает в тот же чат.
                         </p>
+                        <TestInputField
+                            cfg={cfg}
+                            set={set}
+                            hint="Тестовое сообщение клиента"
+                        />
+                        <div>
+                            <label className={label}>
+                                Тестовый chat_id (куда отвечать при Run)
+                            </label>
+                            <input
+                                value={cfg.test_chat_id || ""}
+                                onChange={(e) => set({ test_chat_id: e.target.value })}
+                                placeholder="ваш chat_id"
+                                className={input}
+                            />
+                        </div>
                     </>
                 )}
 
-                {(node.type === "manual" || node.type === "schedule") && (
-                    <p className="text-xs text-gray-400">
-                        У этого типа ноды пока нет настроек.
-                    </p>
+                {node.type === "manual" && <TestInputField cfg={cfg} set={set} />}
+
+                {node.type === "webhook" && (
+                    <>
+                        <WebhookUrl workflowId={workflowId} />
+                        <TestInputField cfg={cfg} set={set} hint='{"email": "a@b.ru"}' />
+                    </>
+                )}
+
+                {node.type === "schedule" && (
+                    <>
+                        <div>
+                            <label className={label}>Интервал, минут</label>
+                            <input
+                                type="number"
+                                min={1}
+                                value={cfg.interval_minutes ?? 60}
+                                onChange={(e) =>
+                                    set({ interval_minutes: Number(e.target.value) || 60 })
+                                }
+                                className={input}
+                            />
+                            <p className="text-xs text-gray-400 mt-1">
+                                Запускается, пока воркфлоу активен. В облаке минимум 5 минут. Счётчик сбрасывается при перезапуске сервера.
+                            </p>
+                        </div>
+                        <TestInputField cfg={cfg} set={set} />
+                    </>
                 )}
             </div>
         </div>

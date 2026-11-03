@@ -179,3 +179,23 @@ def test_node_limit(client):
     dup = simple_workflow()
     dup["nodes"].append({"id": "t", "type": "print", "config": {}})
     assert s.post("/workflows/", json=dup).status_code == 400
+
+
+def test_webhook_trigger_and_template_creation(client):
+    s = register(client)
+    wf = s.post("/workflows/", json={
+        "name": "hook", "description": "", "is_active": True,
+        "nodes": [{"id": "w", "type": "webhook", "config": {}},
+                  {"id": "p", "type": "print", "config": {"value": "email={webhook.body.email}"}}],
+        "edges": [{"id": "e", "from_node": "w", "to_node": "p", "type": "next"}],
+    }).json()
+    url = s.get(f"/workflows/{wf['id']}/webhook-url").json()["url"]
+    path = url[url.index("/api/webhooks/"):].removeprefix("/api")
+    r = s.post(path, json={"email": "a@b.ru"})
+    assert r.status_code == 200 and r.json()["status"] == "success"
+    ex = s.get(f"/executions/{r.json()['execution_id']}").json()
+    assert ex["source"] == "webhook" and ex["result"]["p"] == "email=a@b.ru"
+    assert s.post(f"/webhooks/{wf['id']}/wrong-token", json={}).status_code == 404
+
+    for key in ("meeting_summary", "request_router"):
+        assert s.post(f"/workflows/from-template/{key}").status_code == 200

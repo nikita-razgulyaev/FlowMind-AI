@@ -103,7 +103,7 @@ def fake_net(monkeypatch):
 
     monkeypatch.setattr(httpx, "AsyncClient", factory)
     for limiter in (ratelimit.login_limiter, ratelimit.register_limiter, ratelimit.email_limiter,
-                    ratelimit.ai_chat_limiter, ratelimit.telegram_chat_limiter):
+                    ratelimit.ai_chat_limiter, ratelimit.telegram_chat_limiter, ratelimit.webhook_limiter):
         limiter._hits.clear()
     return NET
 

@@ -157,6 +157,7 @@ class ApiClient {
         return request<{ execution_id: number; status: string; result: any }>(
             `/workflows/${id}/execute`, json("POST", triggerData || {}));
     }
+    getWebhookUrl(id: number) { return request<{ url: string }>(`/workflows/${id}/webhook-url`); }
     createFromTemplate(templateName: string) { return request<Workflow>(`/workflows/from-template/${templateName}`, json("POST")); }
     getExecutions(workflowId?: number) {
         return request<any[]>(`/executions${workflowId ? `?workflow_id=${workflowId}` : ""}`);

@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import settings
 from .database import async_session
 from .migrations import run_migrations
-from .routers import admin, ai, auth, billing, connections, me, system, telegram, workflows
+from .routers import admin, ai, auth, billing, connections, me, system, telegram, webhooks, workflows
 from .seed import run_seed
 from .services.maintenance import scheduler_loop
 from .services.telegram_service import poller
@@ -73,7 +73,7 @@ async def security_headers(request: Request, call_next):
     return response
 
 
-for module in (system, auth, me, workflows, connections, billing, telegram, admin, ai):
+for module in (system, auth, me, workflows, webhooks, connections, billing, telegram, admin, ai):
     app.include_router(module.router, prefix="/api")
 
 
