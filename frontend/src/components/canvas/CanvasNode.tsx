@@ -15,6 +15,7 @@ import {
     Webhook,
     Split,
     Variable,
+    FileText,
 } from "lucide-react";
 
 /** Префикс id source-handle ветки: `out-c:<метка>`; метка попадает в edge.condition. */
@@ -33,6 +34,25 @@ export function getBranches(type: string, config: Record<string, any>): string[]
     if (type === "switch") return [...parseCases(config.cases), "default"];
     return [];
 }
+
+/** Цвет ноды на мини-карте (в тон бейджу типа). */
+export const MINIMAP_COLORS: Record<string, string> = {
+    manual: "#10b981",
+    telegram_trigger: "#06b6d4",
+    webhook: "#ec4899",
+    schedule: "#a855f7",
+    http: "#f97316",
+    telegram_send: "#0ea5e9",
+    google_sheets_append: "#22c55e",
+    google_calendar_create_event: "#ef4444",
+    llm: "#3b82f6",
+    agent: "#6366f1",
+    condition: "#eab308",
+    switch: "#f59e0b",
+    set: "#14b8a6",
+    text_input: "#64748b",
+    print: "#6b7280",
+};
 
 export function branchColor(label: string): string {
     if (label === "true") return "#16a34a";
@@ -117,6 +137,12 @@ export const NODE_META: Record<
         badge: "bg-amber-100 text-amber-700",
         ring: "border-amber-200",
     },
+    text_input: {
+        label: "Текст",
+        icon: FileText,
+        badge: "bg-slate-100 text-slate-700",
+        ring: "border-slate-200",
+    },
     set: {
         label: "Set",
         icon: Variable,
@@ -144,6 +170,8 @@ function preview(type: string, config: Record<string, any>): string {
             );
         case "condition":
             return config.expression || "True";
+        case "text_input":
+            return config.file_name || config.text || "Вставьте текст или загрузите файл";
         case "switch":
             return config.value || "{input}";
         case "set":

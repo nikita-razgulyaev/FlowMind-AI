@@ -16,6 +16,7 @@ agent — AI-агент с инструментами. config: {"mode": "cloud|l
 http — HTTP-запрос. config: {"method": "GET|POST", "url": "https://... (можно {input})"}
 condition — условие с двумя ветками. config: {"expression": "python-выражение, можно {node.field}, например {extract.score} >= 7"}. Исходящие рёбра обязаны иметь "condition": "true" или "false" — выполнится только выбранная ветка.
 switch — выбор ветки по значению. config: {"value": "{classify}", "cases": "support, sales, complaint"}. Рёбра имеют "condition" = одно из значений cases или "default".
+text_input — готовый текст (вставленный или из файла). config: {"text": "..."}; доступен как {id_ноды}.
 set — именованные значения. config: {"values": "key=значение (по строке на ключ)"}; доступны как {set_1.key}.
 webhook — запуск внешним HTTP-вызовом (триггер). config: {}; тело запроса: {webhook.body.поле}.
 schedule — запуск по интервалу (триггер). config: {"interval_minutes": 60}.
@@ -26,7 +27,7 @@ google_calendar_create_event — создать событие. config: {"connec
 
 ALLOWED_TYPES = {
     "manual", "telegram_trigger", "llm", "agent", "http", "condition", "print", "telegram_send",
-    "google_sheets_append", "google_calendar_create_event", "switch", "set", "webhook", "schedule",
+    "google_sheets_append", "google_calendar_create_event", "switch", "set", "webhook", "schedule", "text_input",
 }
 TRIGGERS = {"manual", "telegram_trigger", "webhook", "schedule"}
 MAX_HISTORY = 10

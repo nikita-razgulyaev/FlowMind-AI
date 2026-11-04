@@ -58,15 +58,17 @@ TEMPLATES = {
 
     "meeting_summary": {
         "name": "Саммари встречи + action items",
-        "description": "Ручной запуск: вставьте текст встречи в Manual Trigger (поле «Тестовые данные») и нажмите Run",
+        "description": "Ручной запуск: вставьте текст встречи (или загрузите файл) в ноду «Текст» и нажмите Run",
         "nodes": [
-            {"id": "trigger", "type": "manual", "position": {"x": 80, "y": 140}, "config": {
-                "test_input": "Иван: релиз переносим на пятницу. Мария: тогда я до среды подготовлю тексты для рассылки. "
-                              "Иван: договор с подрядчиком нужно отправить юристам до вторника. Пётр: возьму на себя тесты."}},
-            _llm("summary", "Сделай саммари встречи (3–5 предложений), затем список action items в формате «Ответственный — задача — срок».\n\nТекст встречи:\n{input}", 400, 140, 0.3),
-            {"id": "output", "type": "print", "position": {"x": 720, "y": 140}, "config": {"value": "{summary}"}},
+            {"id": "trigger", "type": "manual", "position": {"x": 80, "y": 140}, "config": {}},
+            {"id": "meeting_text", "type": "text_input", "position": {"x": 400, "y": 140}, "config": {
+                "file_name": "",
+                "text": "Иван: релиз переносим на пятницу. Мария: тогда я до среды подготовлю тексты для рассылки. "
+                        "Иван: договор с подрядчиком нужно отправить юристам до вторника. Пётр: возьму на себя тесты."}},
+            _llm("summary", "Сделай саммари встречи (3–5 предложений), затем список action items в формате «Ответственный — задача — срок».\n\nТекст встречи:\n{meeting_text}", 720, 140, 0.3),
+            {"id": "output", "type": "print", "position": {"x": 1040, "y": 140}, "config": {"value": "{summary}"}},
         ],
-        "edges": [_edge("trigger", "summary"), _edge("summary", "output")],
+        "edges": [_edge("trigger", "meeting_text"), _edge("meeting_text", "summary"), _edge("summary", "output")],
         "is_active": True,
     },
 

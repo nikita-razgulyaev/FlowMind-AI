@@ -42,3 +42,6 @@ Thumbs.db.env
 *.db-shm
 *.db-wal
 .env.prod
+
+#Модели ИИ
+models/

@@ -7,6 +7,7 @@ export interface WorkflowNode {
         | "webhook"
         | "switch"
         | "set"
+        | "text_input"
         | "llm"
         | "http"
         | "condition"

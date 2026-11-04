@@ -39,7 +39,7 @@ FlowMind AI — no-code редактор для сборки AI-агентов �
 
 - **Агент с tool calling.** Любая нода может стать инструментом агента — достаточно заполнить `tool_name` / `tool_description`. Работает на Ollama, на OpenAI-совместимых API и на Hugging Face.
 - **Визуальный редактор** (React Flow): порядок выполнения определяют связи графа (топологическая сортировка), инструменты агента подключаются отдельными связями.
-- **Ноды:** триггеры Manual, **Telegram**, **Webhook**, **Schedule** (интервал); LLM, Agent, HTTP Request (headers/body, JSON-ответ), **Condition** и **Switch** (настоящее ветвление), **Set**, Print, Telegram Send, Google Sheets (добавление строки), Google Calendar (создание события).
+- **Ноды:** триггеры Manual, **Telegram**, **Webhook**, **Schedule** (интервал); LLM, Agent, HTTP Request (headers/body, JSON-ответ), **Condition** и **Switch** (настоящее ветвление), **Set**, **Текст** (вставка текста или загрузка файла: txt, md, csv, json, log, xml, html, yaml, srt…), Print, Telegram Send, Google Sheets (добавление строки), Google Calendar (создание события).
 - **Ветвление.** Condition выполняет только ветку `true` или `false`, Switch — ветку по значению (или `default`). Ветки можно сводить в одну ноду (она выполняется, если пришла хотя бы одна живая связь; пропущенные ноды подставляются пустыми).
 - **Данные между нодами:** `{node}` — весь вывод, `{node.field}` / `{node.items[0].title}` — поле JSON (LLM-ответ с JSON разбирается автоматически). Для Webhook: `{webhook.body.поле}`, `{webhook.query.параметр}`.
 - **Запуск без модалки.** Кнопка Run берёт «Тестовые данные» из настроек триггера (и «Тестовый chat_id» у Telegram-триггера).

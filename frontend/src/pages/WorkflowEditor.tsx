@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import {
     ReactFlow,
     ReactFlowProvider,
@@ -10,6 +10,7 @@ import {
     useNodesState,
     useEdgesState,
     useReactFlow,
+    useNodesInitialized,
     type Node,
     type Edge,
     type Connection,
@@ -18,10 +19,13 @@ import "@xyflow/react/dist/style.css";
 import { Save, Play, Sparkles, Terminal } from "lucide-react";
 import { api } from "../api/client";
 import type { WorkflowNode, WorkflowEdge } from "../types/workflow";
-import CanvasNode, { NODE_META, BRANCH_HANDLE_PREFIX, branchColor } from "../components/canvas/CanvasNode";
+import CanvasNode, { BRANCH_HANDLE_PREFIX, MINIMAP_COLORS, branchColor } from "../components/canvas/CanvasNode";
+import NodePalette from "../components/canvas/NodePalette";
+import MiniMapNode from "../components/canvas/MiniMapNode";
 import NodeConfigPanel from "../components/canvas/NodeConfigPanel";
 import EditorSidebar from "../components/canvas/EditorSidebar";
 import ChatLogPanel from "../components/canvas/ChatLogPanel";
+import type { ExecutionRecord } from "../utils/executionLog";
 import AiChatPanel from "../components/canvas/AiChatPanel";
 import { getSettings } from "../utils/settings";
 
@@ -40,24 +44,9 @@ const nodeTypes = {
     webhook: CanvasNode,
     switch: CanvasNode,
     set: CanvasNode,
+    text_input: CanvasNode,
 };
 
-const PALETTE: { type: string }[] = [
-    { type: "manual" },
-    { type: "telegram_trigger" },
-    { type: "webhook" },
-    { type: "schedule" },
-    { type: "http" },
-    { type: "telegram_send" },
-    { type: "google_sheets_append" },
-    { type: "google_calendar_create_event" },
-    { type: "llm" },
-    { type: "agent" },
-    { type: "condition" },
-    { type: "switch" },
-    { type: "set" },
-    { type: "print" },
-];
 
 function defaultConfig(type: string): Record<string, any> {
     const settings = getSettings();
@@ -116,6 +105,8 @@ function defaultConfig(type: string): Record<string, any> {
             };
         case "condition":
             return { expression: "" };
+        case "text_input":
+            return { text: "", file_name: "" };
         case "switch":
             return { value: "{input}", cases: "" };
         case "set":
@@ -171,43 +162,71 @@ function toFlowEdge(e: WorkflowEdge): Edge {
     };
 }
 
-/** После загрузки нод подгоняет зум так, чтобы весь граф был на экране. */
+/** Подгоняет граф по центру, когда ноды измерены (иначе fitView считает по нодам без размеров и сдвигает граф). */
 function FitViewOnLoad({ nodeCount }: { nodeCount: number }) {
     const { fitView } = useReactFlow();
+    const initialized = useNodesInitialized();
     useEffect(() => {
-        if (nodeCount <= 0) return;
-        const t = requestAnimationFrame(() => {
-            fitView({ padding: 0.2, maxZoom: 1, duration: 400 });
-        });
-        return () => cancelAnimationFrame(t);
-    }, [nodeCount, fitView]);
+        if (!initialized || nodeCount <= 0) return;
+        const t = setTimeout(() => fitView({ padding: 0.2, maxZoom: 1, duration: 300 }), 60);
+        return () => clearTimeout(t);
+    }, [initialized, nodeCount, fitView]);
     return null;
 }
 
 export default function WorkflowEditor() {
     const { id } = useParams();
+    const [searchParams] = useSearchParams();
+    const logParam = Number(searchParams.get("log")) || null;   // переход из истории выполнений
     const navigate = useNavigate();
     const isEditing = !!id;
 
     const [name, setName] = useState("");
     const [description, setDescription] = useState("");
+    const [descriptionDraft, setDescriptionDraft] = useState<string | null>(null);   // не null — модалка открыта
     const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [runStatus, setRunStatus] = useState<string | null>(null);
-    const [showLog, setShowLog] = useState(false);
+    const [showLog, setShowLog] = useState(logParam !== null);
     const [showAiChat, setShowAiChat] = useState(false);
     const [isActive, setIsActive] = useState(true);
-    const [lastExecution, setLastExecution] = useState<{
-        triggerInput?: string;
-        logs: any[];
-    } | null>(null);
+    const [executions, setExecutions] = useState<ExecutionRecord[]>([]);
+    const [focusExecutionId, setFocusExecutionId] = useState<number | null>(logParam);
     const idCounter = useRef(0);
 
     useEffect(() => {
-        if (isEditing) loadWorkflow();
+        if (isEditing) {
+            loadWorkflow();
+            loadExecutions();
+        }
     }, [id]);
+
+    useEffect(() => {
+        if (logParam) {
+            setFocusExecutionId(logParam);
+            setShowLog(true);
+            setSelectedId(null);
+        }
+    }, [logParam]);
+
+    const loadExecutions = async () => {
+        const { data } = await api.getExecutions(Number(id));
+        if (data) setExecutions(data);
+    };
+
+    const clearLogs = async () => {
+        if (!window.confirm(`Удалить запуски этого воркфлоу (${executions.length}) из истории выполнений?`)) return;
+        const { error } = await api.bulkDeleteExecutions(executions.map((e) => e.id));
+        if (error) {
+            alert(`Ошибка: ${error}`);
+            return;
+        }
+        setExecutions([]);
+        setFocusExecutionId(null);
+        setRunStatus(null);
+    };
 
     const loadWorkflow = async () => {
         const { data } = await api.getWorkflow(Number(id));
@@ -347,17 +366,10 @@ export default function WorkflowEditor() {
             setRunStatus(
                 `Готово — execution #${data.execution_id} (${data.status})`,
             );
-            const { data: execData } = await api.getExecution(
-                data.execution_id,
-            );
-            if (execData) {
-                setLastExecution({
-                    triggerInput: execData.trigger_data?.input || "",
-                    logs: execData.logs || [],
-                });
-                setShowAiChat(false);
-                setShowLog(true);
-            }
+            await loadExecutions();
+            setFocusExecutionId(data.execution_id);
+            setShowAiChat(false);
+            setShowLog(true);
         }
         if (error) setRunStatus(`Ошибка: ${error}`);
     };
@@ -374,7 +386,7 @@ export default function WorkflowEditor() {
         <div className="flex h-screen">
             <EditorSidebar />
             <div className="flex-1 flex flex-col min-w-0">
-                <div className="flex items-center justify-between px-6 py-3 border-b border-gray-200 bg-white">
+                <div className="flex items-center justify-between px-6 py-2 border-b border-gray-200 bg-white">
                     <div className="flex items-center gap-3">
                         <input
                             value={name}
@@ -382,12 +394,13 @@ export default function WorkflowEditor() {
                             placeholder="Название workflow"
                             className="text-lg font-bold text-gray-900 border-none outline-none focus:ring-0 bg-transparent"
                         />
-                        <input
-                            value={description}
-                            onChange={(e) => setDescription(e.target.value)}
-                            placeholder="Описание..."
-                            className="text-sm text-gray-400 border-none outline-none focus:ring-0 bg-transparent w-64"
-                        />
+                        <button
+                            onClick={() => setDescriptionDraft(description)}
+                            title="Изменить описание"
+                            className="max-w-xs truncate text-sm text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded px-2 py-1"
+                        >
+                            {description || "Добавить описание..."}
+                        </button>
                     </div>
                     <div className="flex items-center gap-3">
                         {runStatus && (
@@ -414,7 +427,7 @@ export default function WorkflowEditor() {
                             onClick={() => {
                                 setShowAiChat((v) => !v);
                             }}
-                            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border ${
+                            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium border ${
                                 showAiChat
                                     ? "border-indigo-300 bg-indigo-50 text-indigo-700"
                                     : "border-gray-200 text-gray-600 hover:bg-gray-50"
@@ -424,7 +437,7 @@ export default function WorkflowEditor() {
                         </button>
                         <button
                             onClick={() => setShowLog((v) => !v)}
-                            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border ${
+                            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium border ${
                                 showLog
                                     ? "border-gray-300 bg-gray-100 text-gray-700"
                                     : "border-gray-200 text-gray-600 hover:bg-gray-50"
@@ -435,14 +448,14 @@ export default function WorkflowEditor() {
                         <button
                             onClick={handleExecute}
                             disabled={!isEditing}
-                            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm font-medium"
+                            className="flex items-center gap-2 px-4 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm font-medium"
                         >
                             <Play className="w-4 h-4" /> Run
                         </button>
                         <button
                             onClick={handleSave}
                             disabled={isLoading}
-                            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
+                            className="flex items-center gap-2 px-4 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
                         >
                             <Save className="w-4 h-4" />{" "}
                             {isLoading ? "Сохранение..." : "Save"}
@@ -450,21 +463,7 @@ export default function WorkflowEditor() {
                     </div>
                 </div>
 
-                <div className="flex items-center gap-2 px-6 py-2 border-b border-gray-100 bg-white overflow-x-auto">
-                    {PALETTE.map(({ type }) => {
-                        const meta = NODE_META[type];
-                        const Icon = meta.icon;
-                        return (
-                            <button
-                                key={type}
-                                onClick={() => addNode(type)}
-                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap ${meta.badge} hover:opacity-80`}
-                            >
-                                <Icon className="w-3.5 h-3.5" /> + {meta.label}
-                            </button>
-                        );
-                    })}
-                </div>
+                <NodePalette onAdd={addNode} />
 
                 <div className="flex-1 flex min-h-0">
                     <div className="flex-1 relative">
@@ -483,12 +482,6 @@ export default function WorkflowEditor() {
                                 }}
                                 onPaneClick={() => setSelectedId(null)}
                                 deleteKeyCode={["Backspace", "Delete"]}
-                                fitView
-                                fitViewOptions={{
-                                    maxZoom: 1,
-                                    minZoom: 0.15,
-                                    padding: 0.25,
-                                }}
                                 minZoom={0.1}
                                 maxZoom={1.5}
                                 proOptions={{ hideAttribution: true }}
@@ -499,7 +492,13 @@ export default function WorkflowEditor() {
                                 <MiniMap
                                     pannable
                                     zoomable
-                                    className="!bg-white"
+                                    nodeComponent={MiniMapNode}
+                                    nodeColor={(n) => MINIMAP_COLORS[n.type || ""] || "#9ca3af"}
+                                    maskColor="rgba(99, 102, 241, 0.08)"
+                                    maskStrokeColor="#6366f1"
+                                    maskStrokeWidth={1.5}
+                                    style={{ width: 200, height: 130 }}
+                                    className="!bg-white/90 !rounded-xl !border !border-gray-200 !shadow-lg overflow-hidden"
                                 />
                             </ReactFlow>
                         </ReactFlowProvider>
@@ -507,7 +506,7 @@ export default function WorkflowEditor() {
                         {nodes.length === 0 && (
                             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                                 <p className="text-gray-400 text-sm">
-                                    Добавь ноду из панели выше, чтобы начать
+                                    Добавь ноду из панели инструментов, чтобы начать
                                 </p>
                             </div>
                         )}
@@ -544,12 +543,52 @@ export default function WorkflowEditor() {
 
                 {showLog && (
                     <ChatLogPanel
-                        triggerInput={lastExecution?.triggerInput}
-                        logs={lastExecution?.logs || []}
+                        executions={executions}
+                        focusId={focusExecutionId}
+                        onClear={clearLogs}
                         onClose={() => setShowLog(false)}
                     />
                 )}
             </div>
+
+            {descriptionDraft !== null && (
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+                    onMouseDown={(e) => e.target === e.currentTarget && setDescriptionDraft(null)}
+                >
+                    <div className="w-full max-w-lg rounded-xl bg-white p-5 shadow-2xl">
+                        <h3 className="text-base font-semibold text-gray-900">Описание воркфлоу</h3>
+                        <textarea
+                            autoFocus
+                            value={descriptionDraft}
+                            onChange={(e) => setDescriptionDraft(e.target.value)}
+                            onKeyDown={(e) => e.key === "Escape" && setDescriptionDraft(null)}
+                            maxLength={1000}
+                            rows={6}
+                            placeholder="Что делает этот воркфлоу..."
+                            className="mt-3 w-full rounded-lg border border-gray-200 p-3 text-sm outline-none focus:border-blue-400"
+                        />
+                        <div className="mt-1 text-right text-xs text-gray-400">{descriptionDraft.length}/1000</div>
+                        <div className="mt-3 flex justify-end gap-2">
+                            <button
+                                onClick={() => setDescriptionDraft(null)}
+                                className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50"
+                            >
+                                Отмена
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setDescription(descriptionDraft);
+                                    setDescriptionDraft(null);
+                                }}
+                                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                            >
+                                Готово
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

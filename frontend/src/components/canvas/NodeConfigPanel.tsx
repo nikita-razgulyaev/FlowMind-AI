@@ -106,6 +106,65 @@ function TestInputField({
     );
 }
 
+const TEXT_FILE_ACCEPT =
+    ".txt,.md,.markdown,.csv,.tsv,.json,.jsonl,.log,.xml,.html,.htm,.yaml,.yml,.ini,.toml,.srt,.vtt,.rtf,.tex,text/*";
+const MAX_TEXT_FILE_BYTES = 500_000;
+
+function TextInputFields({
+    cfg,
+    set,
+}: {
+    cfg: Record<string, any>;
+    set: (patch: Record<string, any>) => void;
+}) {
+    const [error, setError] = useState("");
+
+    const handleFile = async (file?: File) => {
+        if (!file) return;
+        if (file.size > MAX_TEXT_FILE_BYTES) {
+            setError("Файл больше 500 КБ");
+            return;
+        }
+        setError("");
+        set({ text: await file.text(), file_name: file.name });
+    };
+
+    return (
+        <>
+            <div>
+                <label className={label}>Текст → {"{id_ноды}"}</label>
+                <textarea
+                    value={cfg.text || ""}
+                    onChange={(e) => set({ text: e.target.value, file_name: "" })}
+                    rows={8}
+                    placeholder="Вставьте текст..."
+                    className={input}
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                    {(cfg.text || "").length} символов
+                    {cfg.file_name ? ` · из файла ${cfg.file_name}` : ""}
+                </p>
+            </div>
+            <div>
+                <label className={label}>Или загрузите текстовый файл</label>
+                <input
+                    type="file"
+                    accept={TEXT_FILE_ACCEPT}
+                    onChange={(e) => {
+                        handleFile(e.target.files?.[0]);
+                        e.target.value = "";
+                    }}
+                    className="block w-full text-xs text-gray-500 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:py-2 file:text-xs file:font-medium file:text-blue-700 hover:file:bg-blue-100"
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                    txt, md, csv, json, log, xml, html, yaml, srt и другие текстовые форматы, до 500 КБ. Файл заменяет текст выше.
+                </p>
+                {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+            </div>
+        </>
+    );
+}
+
 function WebhookUrl({ workflowId }: { workflowId?: number }) {
     const [url, setUrl] = useState("");
     useEffect(() => {
@@ -937,6 +996,8 @@ export default function NodeConfigPanel({
                 )}
 
                 {node.type === "manual" && <TestInputField cfg={cfg} set={set} />}
+
+                {node.type === "text_input" && <TextInputFields cfg={cfg} set={set} />}
 
                 {node.type === "webhook" && (
                     <>

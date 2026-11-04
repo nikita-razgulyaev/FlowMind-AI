@@ -12,7 +12,7 @@ from .services.safe_eval import safe_eval
 from .services.ssrf import assert_public_url
 
 MAX_HTTP_REDIRECTS = 3
-MAX_RENDER_CHARS = 4000                     # длина одного подставляемого значения {node}
+MAX_RENDER_CHARS = 20000                    # длина одного подставляемого значения {node}
 MAX_HTTP_JSON_CHARS = 20000                 # ответ HTTP разбирается в json, только если он не больше
 TRIGGER_TYPES = ("manual", "telegram_trigger", "webhook", "schedule")
 BRANCH_TRIGGER_KEYS = ("telegram", "webhook", "schedule")     # признаки «боевого» запуска (не кнопка Run)
@@ -212,6 +212,7 @@ class WorkflowEngine:
             "telegram_trigger": self._handle_manual,
             "webhook": self._handle_manual,
             "schedule": self._handle_manual,
+            "text_input": self._handle_text_input,
             "switch": self._handle_switch,
             "set": self._handle_set,
             "llm": self._handle_llm,
@@ -236,6 +237,10 @@ class WorkflowEngine:
         if isinstance(trigger_data, dict) and trigger_data.get("input") not in ("", {}, None):
             return trigger_data
         return {"input": self.context.get("input", "")}
+
+    async def _handle_text_input(self, config, td, extra_vars=None):
+        """Готовый текст (вставленный или из файла) — как есть, без подстановок."""
+        return str(config.get("text", ""))
 
     async def _handle_switch(self, config, td, extra_vars=None):
         """Выбирает ветку: совпадение значения с одним из cases (точное, затем по вхождению), иначе «default»."""

@@ -91,7 +91,7 @@ def test_templates_are_valid_graphs():
 def test_meeting_summary_template_runs_without_input():
     tpl = TEMPLATES["meeting_summary"]
     ctx = run({"nodes": tpl["nodes"], "edges": tpl["edges"]}, {"Текст встречи": "САММАРИ"}, trigger={"input": ""}).context
-    assert ctx["output"] == "САММАРИ"
+    assert ctx["output"] == "САММАРИ" and "релиз переносим" in ctx["meeting_text"]
 
 
 def test_request_router_template_routes_complaint():

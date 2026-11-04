@@ -1,31 +1,20 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import {
     CheckCircle2,
     XCircle,
     Loader2,
-    ChevronDown,
-    ExternalLink,
+    ChevronRight,
     Trash2,
 } from "lucide-react";
 import { api } from "../api/client";
 import type { Workflow } from "../types/workflow";
 import EditorSidebar from "../components/canvas/EditorSidebar";
 import {
-    buildLines,
     extractTriggerInput,
-    type LogEntry,
+    formatDate,
+    type ExecutionRecord as Execution,
 } from "../utils/executionLog";
-
-interface Execution {
-    id: number;
-    workflow_id: number;
-    status: string;
-    trigger_data: Record<string, any> | null;
-    logs: LogEntry[] | null;
-    started_at: string;
-    finished_at: string | null;
-}
 
 const STATUS_META: Record<
     string,
@@ -44,27 +33,13 @@ const STATUS_META: Record<
     },
 };
 
-function formatDate(iso: string): string {
-    try {
-        return new Date(iso).toLocaleString("ru-RU", {
-            day: "2-digit",
-            month: "2-digit",
-            year: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-        });
-    } catch {
-        return iso;
-    }
-}
-
 export default function ExecutionHistory() {
+    const navigate = useNavigate();
     const [executions, setExecutions] = useState<Execution[]>([]);
     const [workflowNames, setWorkflowNames] = useState<Record<number, string>>(
         {},
     );
     const [isLoading, setIsLoading] = useState(true);
-    const [expandedId, setExpandedId] = useState<number | null>(null);
     const [selected, setSelected] = useState<Set<number>>(new Set());
     const [confirmOpen, setConfirmOpen] = useState(false);
     const [deleting, setDeleting] = useState(false);
@@ -123,7 +98,6 @@ export default function ExecutionHistory() {
         }
         setExecutions((list) => list.filter((e) => !selected.has(e.id)));
         setSelected(new Set());
-        if (expandedId && selected.has(expandedId)) setExpandedId(null);
     };
 
     const allSelected =
@@ -184,14 +158,10 @@ export default function ExecutionHistory() {
                                     STATUS_META[ex.status] ||
                                     STATUS_META.running;
                                 const StatusIcon = meta.icon;
-                                const isOpen = expandedId === ex.id;
                                 const isSel = selected.has(ex.id);
                                 const triggerInput = extractTriggerInput(
                                     ex.trigger_data,
                                 );
-                                const lines = isOpen
-                                    ? buildLines(triggerInput, ex.logs || [])
-                                    : [];
 
                                 return (
                                     <div
@@ -220,10 +190,11 @@ export default function ExecutionHistory() {
                                             </label>
                                             <button
                                                 onClick={() =>
-                                                    setExpandedId(
-                                                        isOpen ? null : ex.id,
+                                                    navigate(
+                                                        `/workflow/${ex.workflow_id}?log=${ex.id}`,
                                                     )
                                                 }
+                                                title="Открыть воркфлоу и лог этого запуска"
                                                 className="flex-1 flex items-center gap-3 pr-4 py-3 text-left hover:bg-gray-50 min-w-0"
                                             >
                                                 <span
@@ -253,39 +224,10 @@ export default function ExecutionHistory() {
                                                 <span className="text-xs text-gray-400 shrink-0">
                                                     {formatDate(ex.started_at)}
                                                 </span>
-                                                <Link
-                                                    to={`/workflow/${ex.workflow_id}`}
-                                                    onClick={(e) =>
-                                                        e.stopPropagation()
-                                                    }
-                                                    className="p-1.5 text-gray-300 hover:text-blue-500 hover:bg-blue-50 rounded shrink-0"
-                                                    title="Открыть workflow"
-                                                >
-                                                    <ExternalLink className="w-3.5 h-3.5" />
-                                                </Link>
-                                                <ChevronDown
-                                                    className={`w-4 h-4 text-gray-300 shrink-0 transition-transform ${isOpen ? "rotate-180" : ""}`}
-                                                />
+                                                <ChevronRight className="w-4 h-4 text-gray-300 shrink-0" />
                                             </button>
                                         </div>
 
-                                        {isOpen && (
-                                            <div className="border-t border-gray-100 px-4 py-3 space-y-1.5 bg-gray-50/50">
-                                                {lines.length === 0 && (
-                                                    <p className="text-xs text-gray-400">
-                                                        Нет логов
-                                                    </p>
-                                                )}
-                                                {lines.map((line, i) => (
-                                                    <div
-                                                        key={i}
-                                                        className="text-xs font-mono text-gray-700 whitespace-pre-wrap break-words"
-                                                    >
-                                                        {line}
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
                                     </div>
                                 );
                             })}
