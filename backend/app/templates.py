@@ -40,7 +40,7 @@ TEMPLATES = {
             _send("send_reply", "{reply}", 720, 140),
         ],
         "edges": [_edge("trigger", "reply"), _edge("reply", "send_reply")],
-        "is_active": True,
+        "is_active": False,
     },
 
     "lead_to_sheets": {
@@ -53,7 +53,7 @@ TEMPLATES = {
             _send("send_reply", "Спасибо! Мы получили вашу заявку и скоро свяжемся.", 1040, 140),
         ],
         "edges": [_edge("trigger", "extract"), _edge("extract", "save_lead"), _edge("save_lead", "send_reply")],
-        "is_active": True,
+        "is_active": False,
     },
 
     "meeting_summary": {
@@ -69,7 +69,7 @@ TEMPLATES = {
             {"id": "output", "type": "print", "position": {"x": 1040, "y": 140}, "config": {"value": "{summary}"}},
         ],
         "edges": [_edge("trigger", "meeting_text"), _edge("meeting_text", "summary"), _edge("summary", "output")],
-        "is_active": True,
+        "is_active": False,
     },
 
     "lead_qualification": {
@@ -90,7 +90,7 @@ TEMPLATES = {
             _edge("is_hot", "reply_hot", "true"), _edge("is_hot", "reply_warm", "false"),
             _edge("reply_hot", "send_reply"), _edge("reply_warm", "send_reply"),
         ],
-        "is_active": True,
+        "is_active": False,
     },
 
     "request_router": {
@@ -115,6 +115,6 @@ TEMPLATES = {
             _edge("reply_complaint", "send_reply"), _edge("reply_other", "send_reply"),
             _edge("send_reply", "log_request"),
         ],
-        "is_active": True,
+        "is_active": False,
     },
 }

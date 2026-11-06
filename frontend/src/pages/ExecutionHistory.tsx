@@ -26,6 +26,7 @@ const STATUS_META: Record<
         label: "success",
     },
     failed: { icon: XCircle, color: "text-red-600 bg-red-50", label: "failed" },
+    cancelled: { icon: XCircle, color: "text-gray-600 bg-gray-100", label: "cancelled" },
     running: {
         icon: Loader2,
         color: "text-blue-600 bg-blue-50",

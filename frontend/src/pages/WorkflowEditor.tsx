@@ -16,7 +16,7 @@ import {
     type Connection,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Save, Play, Sparkles, Terminal } from "lucide-react";
+import { Save, Play, Square, Sparkles, Terminal } from "lucide-react";
 import { api } from "../api/client";
 import type { WorkflowNode, WorkflowEdge } from "../types/workflow";
 import CanvasNode, {
@@ -34,6 +34,9 @@ import ChatLogPanel from "../components/canvas/ChatLogPanel";
 import type { ExecutionRecord } from "../utils/executionLog";
 import AiChatPanel from "../components/canvas/AiChatPanel";
 import { getSettings } from "../utils/settings";
+
+const RESUME_WINDOW_MS = 15 * 60 * 1000;   // запуск старше 15 минут считаем потерянным и не подхватываем
+const LISTENER_TYPES = ["telegram_trigger", "webhook", "schedule"];
 
 const nodeTypes = {
     manual: CanvasNode,
@@ -201,7 +204,9 @@ export default function WorkflowEditor() {
     const pollTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
     const [showLog, setShowLog] = useState(logParam !== null);
     const [showAiChat, setShowAiChat] = useState(false);
-    const [isActive, setIsActive] = useState(true);
+    const [isActive, setIsActive] = useState(false);        // воркфлоу «запущен»: слушает Telegram/Webhook/Schedule
+    const [isToggling, setIsToggling] = useState(false);
+    const [runningExecutionId, setRunningExecutionId] = useState<number | null>(null);
     const [executions, setExecutions] = useState<ExecutionRecord[]>([]);
     const [focusExecutionId, setFocusExecutionId] = useState<number | null>(logParam);
     const idCounter = useRef(0);
@@ -209,7 +214,7 @@ export default function WorkflowEditor() {
     useEffect(() => {
         if (isEditing) {
             loadWorkflow();
-            loadExecutions();
+            loadExecutions(true);
         }
     }, [id]);
 
@@ -221,9 +226,15 @@ export default function WorkflowEditor() {
         }
     }, [logParam]);
 
-    const loadExecutions = async () => {
+    /** resume: при открытии страницы подхватываем ещё идущий запуск (обновление страницы не сбрасывает прогресс). */
+    const loadExecutions = async (resume = false) => {
         const { data } = await api.getExecutions(Number(id));
-        if (data) setExecutions(data);
+        if (!data) return;
+        setExecutions(data);
+        const live = data[0];
+        if (resume && live?.status === "running" && Date.now() - new Date(live.started_at).getTime() < RESUME_WINDOW_MS) {
+            startPolling(live.id);
+        }
     };
 
     const clearLogs = async () => {
@@ -273,6 +284,8 @@ export default function WorkflowEditor() {
     };
 
     /** Связи по ходу запуска: данные «текут» (анимация) от выполненной ноды к следующей, невыбранные ветки тускнеют. */
+    const hasListener = nodes.some((n) => LISTENER_TYPES.includes(n.type as string));
+
     const displayEdges = useMemo(() => {
         if (!runProgress) return edges;
         return edges.map((e) => {
@@ -367,49 +380,50 @@ export default function WorkflowEditor() {
         setSelectedId(null);
     };
 
-    const hasTelegramTrigger = nodes.some((n) => n.type === "telegram_trigger");
-
-    const handleSave = async () => {
+    /** Сохраняет граф; true — успех. Для нового воркфлоу после создания открывает его страницу. */
+    const saveWorkflow = async (): Promise<boolean> => {
         setIsLoading(true);
         const payload = buildPayload();
         const { data, error } = isEditing
             ? await api.updateWorkflow(Number(id), payload)
             : await api.createWorkflow(payload);
-
-        if (data) {
-            if (!isEditing) navigate(`/workflow/${data.id}`);
-        }
-        if (error) alert(`Error: ${error}`);
         setIsLoading(false);
+        if (error) {
+            alert(`Error: ${error}`);
+            return false;
+        }
+        if (data && !isEditing) navigate(`/workflow/${data.id}`);
+        return true;
     };
 
-    /** Run без модалки: тестовые данные берутся из настроек триггера (поле «Тестовые данные»). */
+    const handleSave = async () => {
+        await saveWorkflow();
+    };
+
     useEffect(() => () => clearTimeout(pollTimer.current), []);
 
-    /** Запуск в фоне + опрос прогресса: ноды на холсте показывают краткий статус по ходу выполнения. */
-    const runWorkflow = async () => {
+    /** Опрос прогресса запуска: ноды на холсте показывают краткий статус по ходу выполнения. */
+    const startPolling = (executionId: number) => {
         clearTimeout(pollTimer.current);
+        setRunningExecutionId(executionId);
         setRunStatus("Выполняется...");
-        setRunProgress({});
         setRunFinished(false);
         setIsRunning(true);
-        const { data, error } = await api.executeWorkflowAsync(Number(id), { input: "" });
-        if (error || !data) {
-            setRunStatus(`Ошибка: ${error}`);
-            setRunProgress(null);
-            setIsRunning(false);
-            return;
-        }
 
         const poll = async (attempt: number) => {
-            const { data: progress } = await api.getExecutionProgress(data.execution_id);
+            const { data: progress } = await api.getExecutionProgress(executionId);
             if (progress) setRunProgress(progress.nodes as Record<string, NodeRunState>);
             if (progress && progress.status !== "running") {
-                setRunStatus(`Готово — execution #${data.execution_id} (${progress.status})`);
+                setRunStatus(
+                    progress.status === "cancelled"
+                        ? `Остановлено — execution #${executionId}`
+                        : `Готово — execution #${executionId} (${progress.status})`,
+                );
                 setRunFinished(true);
                 setIsRunning(false);
+                setRunningExecutionId(null);
                 await loadExecutions();
-                setFocusExecutionId(data.execution_id);
+                setFocusExecutionId(executionId);
                 setShowAiChat(false);
                 setShowLog(true);
                 return;
@@ -417,6 +431,7 @@ export default function WorkflowEditor() {
             if (attempt > 600) {   // ~5 минут без завершения — перестаём ждать, запуск продолжится на сервере
                 setRunStatus("Запуск продолжается на сервере — смотри историю выполнений");
                 setIsRunning(false);
+                setRunningExecutionId(null);
                 return;
             }
             pollTimer.current = setTimeout(() => poll(attempt + 1), 500);
@@ -424,13 +439,46 @@ export default function WorkflowEditor() {
         poll(0);
     };
 
-    const handleExecute = async () => {
+    /** Разовый запуск (Run / Тест): сохраняет граф, чтобы выполнялось то, что на холсте; тестовые данные берутся из триггера. */
+    const runWorkflow = async () => {
         if (!isEditing) {
             alert("Сохрани workflow перед запуском");
             return;
         }
         if (isRunning) return;
-        await runWorkflow();
+        if (!(await saveWorkflow())) return;
+        setRunProgress({});
+        const { data, error } = await api.executeWorkflowAsync(Number(id), { input: "" });
+        if (error || !data) {
+            setRunStatus(`Ошибка: ${error}`);
+            setRunProgress(null);
+            return;
+        }
+        startPolling(data.execution_id);
+    };
+
+    const stopRun = async () => {
+        if (runningExecutionId) await api.cancelExecution(runningExecutionId);
+    };
+
+    /** Запуск/остановка воркфлоу с триггерами: пока он запущен, Telegram/Webhook/Schedule срабатывают. Состояние хранится на сервере. */
+    const toggleActive = async () => {
+        if (!isEditing) {
+            alert("Сохрани workflow перед запуском");
+            return;
+        }
+        setIsToggling(true);
+        if (isActive || (await saveWorkflow())) {
+            const { data, error } = isActive
+                ? await api.deactivateWorkflow(Number(id))
+                : await api.activateWorkflow(Number(id));
+            if (error) alert(`Error: ${error}`);
+            else if (data) {
+                setIsActive(data.is_active);
+                setRunStatus(data.is_active ? "Запущен — принимает новые события" : "Остановлен");
+            }
+        }
+        setIsToggling(false);
     };
 
     return (
@@ -459,20 +507,16 @@ export default function WorkflowEditor() {
                                 {runStatus}
                             </span>
                         )}
-                        {hasTelegramTrigger && (
-                            <label
-                                className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer select-none"
-                                title="Пока воркфлоу активен, Telegram-триггер принимает сообщения"
+                        {hasListener && (
+                            <span
+                                className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
+                                    isActive ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"
+                                }`}
+                                title="Запущенный воркфлоу принимает только новые события (сообщения после запуска)"
                             >
-                                <input
-                                    type="checkbox"
-                                    checked={isActive}
-                                    onChange={(e) =>
-                                        setIsActive(e.target.checked)
-                                    }
-                                />
-                                Активен
-                            </label>
+                                <span className={`h-2 w-2 rounded-full ${isActive ? "bg-emerald-500 animate-pulse" : "bg-gray-400"}`} />
+                                {isActive ? "Слушает" : "Остановлен"}
+                            </span>
                         )}
                         <button
                             onClick={() => {
@@ -496,13 +540,44 @@ export default function WorkflowEditor() {
                         >
                             <Terminal className="w-4 h-4" /> Лог
                         </button>
-                        <button
-                            onClick={handleExecute}
-                            disabled={!isEditing || isRunning}
-                            className="flex items-center gap-2 px-4 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm font-medium"
-                        >
-                            <Play className="w-4 h-4" /> Run
-                        </button>
+                        {hasListener && (
+                            <button
+                                onClick={isRunning ? stopRun : runWorkflow}
+                                disabled={!isEditing || (!isRunning && isToggling)}
+                                title="Разовый запуск с тестовыми данными из триггера"
+                                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium border disabled:opacity-50 ${
+                                    isRunning
+                                        ? "border-red-300 bg-red-50 text-red-700 hover:bg-red-100"
+                                        : "border-gray-200 text-gray-600 hover:bg-gray-50"
+                                }`}
+                            >
+                                {isRunning ? <Square className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                                {isRunning ? "Стоп теста" : "Тест"}
+                            </button>
+                        )}
+                        {hasListener ? (
+                            <button
+                                onClick={toggleActive}
+                                disabled={isToggling || !isEditing}
+                                className={`flex items-center gap-2 px-4 py-1.5 text-white rounded-lg disabled:opacity-50 text-sm font-medium ${
+                                    isActive ? "bg-red-600 hover:bg-red-700" : "bg-green-600 hover:bg-green-700"
+                                }`}
+                            >
+                                {isActive ? <Square className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                                {isActive ? "Стоп" : "Запустить"}
+                            </button>
+                        ) : (
+                            <button
+                                onClick={isRunning ? stopRun : runWorkflow}
+                                disabled={!isEditing}
+                                className={`flex items-center gap-2 px-4 py-1.5 text-white rounded-lg disabled:opacity-50 text-sm font-medium ${
+                                    isRunning ? "bg-red-600 hover:bg-red-700" : "bg-green-600 hover:bg-green-700"
+                                }`}
+                            >
+                                {isRunning ? <Square className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                                {isRunning ? "Стоп" : "Run"}
+                            </button>
+                        )}
                         <button
                             onClick={handleSave}
                             disabled={isLoading}

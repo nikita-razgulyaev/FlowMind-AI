@@ -218,3 +218,28 @@ def test_async_execute_exposes_progress(client):
         time.sleep(0.1)
     assert progress["status"] == "success"
     assert {k: v["status"] for k, v in progress["nodes"].items()} == {"a": "done", "b": "done"}
+
+
+def test_running_execution_can_be_cancelled(client, monkeypatch):
+    import asyncio
+    import time
+    from app.services import runner
+
+    async def slow_execute(self, trigger_data=None):
+        self._report("a", "running")
+        await asyncio.sleep(30)
+
+    monkeypatch.setattr(runner.WorkflowEngine, "execute", slow_execute)
+    s = register(client)
+    wf = s.post("/workflows/", json={"name": "slow", "description": "", "is_active": False,
+                                     "nodes": [{"id": "a", "type": "manual", "config": {}}], "edges": []}).json()
+    execution_id = s.post(f"/workflows/{wf['id']}/execute-async", json={}).json()["execution_id"]
+    time.sleep(0.3)
+    assert s.get(f"/executions/{execution_id}/progress").json()["status"] == "running"
+    s.post(f"/executions/{execution_id}/cancel")
+    for _ in range(40):
+        progress = s.get(f"/executions/{execution_id}/progress").json()
+        if progress["status"] != "running":
+            break
+        time.sleep(0.1)
+    assert progress["status"] == "cancelled" and progress["nodes"]["a"]["status"] == "stopped"

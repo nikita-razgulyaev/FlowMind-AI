@@ -21,7 +21,7 @@ import {
     X,
 } from "lucide-react";
 
-export type NodeRunStatus = "running" | "done" | "failed" | "skipped";
+export type NodeRunStatus = "running" | "done" | "failed" | "skipped" | "stopped";
 export interface NodeRunState {
     status: NodeRunStatus;
     ms: number | null;
@@ -40,6 +40,7 @@ const RUN_BADGE: Record<NodeRunStatus, { ring: string; pill: string; label: stri
     done: { ring: "!border-emerald-500", pill: "bg-emerald-600 text-white", label: "" },
     failed: { ring: "!border-red-500 ring-2 ring-red-200", pill: "bg-red-600 text-white", label: "ошибка" },
     skipped: { ring: "opacity-45", pill: "bg-gray-400 text-white", label: "пропущена" },
+    stopped: { ring: "!border-amber-500", pill: "bg-amber-500 text-white", label: "остановлена" },
 };
 
 /** Префикс id source-handle ветки: `out-c:<метка>`; метка попадает в edge.condition. */

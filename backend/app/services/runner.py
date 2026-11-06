@@ -25,6 +25,7 @@ _running: dict[int, int] = defaultdict(int)
 MAX_TRACKED = 200
 _progress: "OrderedDict[int, dict[str, dict]]" = OrderedDict()
 _background_tasks: set = set()
+_tasks_by_execution: dict[int, asyncio.Task] = {}
 
 
 def record_progress(execution_id: int, node_id: str, status: str, duration_ms: Optional[int] = None) -> None:
@@ -88,6 +89,12 @@ async def execute_execution(
         result = await asyncio.wait_for(engine.execute(trigger_data), timeout=settings.max_execution_seconds)
         execution.status = "success"
         execution.result = _jsonable(result)
+    except asyncio.CancelledError:                 # кнопка «Стоп»
+        execution.status = "cancelled"
+        execution.result = {"error": "Остановлено пользователем"}
+        for state in _progress.get(execution.id, {}).values():
+            if state["status"] == "running":
+                state["status"] = "stopped"
     except asyncio.TimeoutError:
         execution.status = "failed"
         execution.result = {"error": f"Превышено максимальное время выполнения ({settings.max_execution_seconds} с)"}
@@ -131,7 +138,17 @@ def start_in_background(execution_id: int, user_id: int, workflow_id: int, trigg
 
     task = asyncio.create_task(job())
     _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
+    _tasks_by_execution[execution_id] = task
+    task.add_done_callback(lambda t: (_background_tasks.discard(t), _tasks_by_execution.pop(execution_id, None)))
+
+
+def cancel_task(execution_id: int) -> bool:
+    """Останавливает выполняющийся запуск. False — живой задачи нет."""
+    task = _tasks_by_execution.get(execution_id)
+    if not task or task.done():
+        return False
+    task.cancel()
+    return True
 
 
 def _jsonable(value):

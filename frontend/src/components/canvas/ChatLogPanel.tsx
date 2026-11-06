@@ -27,6 +27,7 @@ const TONE_STYLES: Record<string, string> = {
 const STATUS_ICON: Record<string, { icon: typeof CheckCircle2; color: string }> = {
     success: { icon: CheckCircle2, color: "text-emerald-600" },
     failed: { icon: XCircle, color: "text-red-600" },
+    cancelled: { icon: XCircle, color: "text-gray-500" },
     running: { icon: Loader2, color: "text-blue-600 animate-spin" },
 };
 

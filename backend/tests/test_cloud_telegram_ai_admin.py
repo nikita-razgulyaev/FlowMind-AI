@@ -270,3 +270,27 @@ def test_admin_edit_plan_and_stats(client, admin):
     assert stats["users_total"] >= 1 and len(stats["runs_by_day"]) == 14
     assert {"mrr", "revenue_total", "revenue_30d", "ai", "paid_subscriptions"} <= set(stats)
     assert stats["ai"]["key_configured"] is True
+
+
+def test_telegram_ignores_messages_sent_before_start(client, fake_net):
+    s = register(client)
+    cid = bot_connection(s)
+    wf = s.post("/workflows/", json={**telegram_workflow(cid), "is_active": False}).json()
+    assert fake_net.telegram_calls == []                           # остановленный воркфлоу вебхук не включает
+
+    started = s.post(f"/workflows/{wf['id']}/activate").json()
+    assert started["is_active"] is True
+    method, payload = fake_net.telegram_calls[-1]
+    assert method == "setWebhook" and payload["drop_pending_updates"] is True
+
+    now = int(time.time())
+    old, new = update(1, text="старое"), update(2, text="новое")
+    old["message"]["date"], new["message"]["date"] = now - 3600, now + 1
+    assert hook(client, cid, old).status_code == 200 and hook(client, cid, new).status_code == 200
+    assert wait_for(lambda: len(s.get("/executions", params={"workflow_id": wf["id"]}).json()) >= 1)
+    time.sleep(0.3)
+    texts = [e["trigger_data"]["telegram"]["text"] for e in s.get("/executions", params={"workflow_id": wf["id"]}).json()]
+    assert texts == ["новое"]
+
+    stopped = s.post(f"/workflows/{wf['id']}/deactivate").json()
+    assert stopped["is_active"] is False and fake_net.telegram_calls[-1][0] == "deleteWebhook"

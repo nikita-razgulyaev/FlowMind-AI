@@ -957,6 +957,9 @@ export default function NodeConfigPanel({
                                 placeholder="123456789, 987654321"
                                 className={input}
                             />
+                            <p className="text-xs text-gray-400 mt-1">
+                                Пусто — бот принимает сообщения от всех пользователей, написанные после запуска воркфлоу.
+                            </p>
                         </div>
                         <label className="flex items-center gap-2 text-sm text-gray-600">
                             <input

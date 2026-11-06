@@ -161,6 +161,9 @@ class ApiClient {
         return request<{ execution_id: number; status: string }>(
             `/workflows/${id}/execute-async`, json("POST", triggerData || {}));
     }
+    activateWorkflow(id: number) { return request<Workflow>(`/workflows/${id}/activate`, json("POST")); }
+    deactivateWorkflow(id: number) { return request<Workflow>(`/workflows/${id}/deactivate`, json("POST")); }
+    cancelExecution(id: number) { return request<{ status: string }>(`/executions/${id}/cancel`, json("POST")); }
     getExecutionProgress(id: number) {
         return request<{ status: string; nodes: Record<string, { status: string; ms: number | null }> }>(
             `/executions/${id}/progress`);

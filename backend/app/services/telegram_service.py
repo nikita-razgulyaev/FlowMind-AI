@@ -17,6 +17,7 @@ from .runner import run_workflow
 
 log = logging.getLogger("flowmind.telegram")
 TG_API = "https://api.telegram.org"
+ACTIVATION_SKEW_SECONDS = 3          # допуск на расхождение часов сервера и Telegram
 
 
 def bot_id(token: str) -> str:
@@ -72,6 +73,8 @@ async def sync_webhook(db, connection: Connection) -> dict:
             await tg_call(token, "setWebhook", {
                 "url": webhook_url(connection.id), "secret_token": webhook_secret(connection.id),
                 "allowed_updates": ["message"],
+                # первый запуск вебхука: не доставлять сообщения, накопившиеся, пока воркфлоу был остановлен
+                "drop_pending_updates": not (connection.config or {}).get("webhook_registered"),
             })
             status = "registered"
             flag = True
@@ -137,6 +140,9 @@ async def handle_update(connection_id: int, update: dict) -> None:
         for wf in await workflows_for_connection(db, conn):
             node_cfg = next((n.get("config") or {} for n in trigger_nodes(wf)
                              if (n.get("config") or {}).get("connection_id") == connection_id), {})
+            sent_at = msg.get("date")
+            if wf.activated_at and sent_at and sent_at < wf.activated_at.timestamp() - ACTIVATION_SKEW_SECONDS:
+                continue                                    # написано до запуска воркфлоу
             allowed = {s.strip() for s in str(node_cfg.get("allowed_chat_ids", "")).split(",") if s.strip()}
             if allowed and str(chat_id) not in allowed:
                 continue

@@ -14,7 +14,7 @@ from ..models import Execution, User, Workflow, utcnow
 from ..schemas import WorkflowCreate, WorkflowResponse
 from ..services import telegram_service
 from ..services.limits import QuotaError, check_workflow_quota, get_user_plan, workflow_flags
-from ..services.runner import create_execution, get_progress, run_workflow, start_in_background
+from ..services.runner import cancel_task, create_execution, get_progress, run_workflow, start_in_background
 from ..templates import TEMPLATES
 
 router = APIRouter(tags=["workflows"])
@@ -45,7 +45,7 @@ async def create_workflow(data: WorkflowCreate, user: User = Depends(get_current
 
     wf = Workflow(user_id=user.id, name=data.name, description=data.description, nodes=nodes,
                   edges=[e.model_dump() for e in data.edges], is_active=data.is_active,
-                  is_ai=is_ai, has_telegram_trigger=has_tg)
+                  activated_at=utcnow() if data.is_active else None, is_ai=is_ai, has_telegram_trigger=has_tg)
     db.add(wf)
     await db.commit()
     await db.refresh(wf)
@@ -83,6 +83,8 @@ async def update_workflow(workflow_id: int, data: WorkflowCreate, user: User = D
         await _check_transition(db, user, plan, wf, is_ai, becomes_ai or becomes_regular, becomes_tg)
 
     had_tg = wf.has_telegram_trigger
+    if data.is_active and not wf.is_active:
+        wf.activated_at = utcnow()
     wf.name, wf.description = data.name, data.description
     wf.nodes, wf.edges = nodes, [e.model_dump() for e in data.edges]
     wf.is_active, wf.is_ai, wf.has_telegram_trigger = data.is_active, is_ai, has_tg
@@ -91,6 +93,31 @@ async def update_workflow(workflow_id: int, data: WorkflowCreate, user: User = D
     if has_tg or had_tg:
         await telegram_service.sync_user_webhooks(db, user.id)
     return wf
+
+
+async def _set_active(db: AsyncSession, user: User, wf: Workflow, active: bool) -> Workflow:
+    """Запуск/остановка воркфлоу. При запуске фиксируется время: Telegram-триггер реагирует только на более новые сообщения."""
+    if active and not wf.is_active:
+        if wf.has_telegram_trigger:
+            plan = await get_user_plan(db, user)
+            await _check_transition(db, user, plan, wf, wf.is_ai, False, True)
+        wf.activated_at = utcnow()
+    wf.is_active = active
+    await db.commit()
+    await db.refresh(wf)
+    if wf.has_telegram_trigger:
+        await telegram_service.sync_user_webhooks(db, user.id)
+    return wf
+
+
+@router.post("/workflows/{workflow_id}/activate", response_model=WorkflowResponse)
+async def activate_workflow(workflow_id: int, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    return await _set_active(db, user, await _get_own(db, user, workflow_id), True)
+
+
+@router.post("/workflows/{workflow_id}/deactivate", response_model=WorkflowResponse)
+async def deactivate_workflow(workflow_id: int, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    return await _set_active(db, user, await _get_own(db, user, workflow_id), False)
 
 
 async def _check_transition(db, user, plan, wf, is_ai, category_changed, tg_changed) -> None:
@@ -181,6 +208,20 @@ async def execution_progress(execution_id: int, user: User = Depends(get_current
         raise HTTPException(404, "Execution not found")
     await db.refresh(execution)
     return {"status": execution.status, "nodes": get_progress(execution)}
+
+
+@router.post("/executions/{execution_id}/cancel")
+async def cancel_execution(execution_id: int, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    execution = await db.get(Execution, execution_id)
+    if not execution or execution.user_id != user.id:
+        raise HTTPException(404, "Execution not found")
+    if execution.status == "running" and not cancel_task(execution.id):
+        # задачи уже нет (например, сервер перезапускался) — просто закрываем запись
+        execution.status = "cancelled"
+        execution.result = {"error": "Остановлено пользователем"}
+        execution.finished_at = utcnow()
+        await db.commit()
+    return {"status": execution.status}
 
 
 # ───────── шаблоны ─────────
