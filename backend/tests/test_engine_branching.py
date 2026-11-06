@@ -100,3 +100,17 @@ def test_request_router_template_routes_complaint():
     ctx = run(wf, {"Определи тип": "complaint", "менеджер по работе с жалобами": "Извините!"},
               trigger={"input": "брак", "telegram": {"chat_id": 1, "text": "брак"}}).context
     assert ctx["reply_complaint"] == "Извините!" and ctx["reply_support"] == "" and ctx["send_reply"]
+
+
+def test_progress_reports_running_done_skipped_failed():
+    events = []
+    wf = {"nodes": [
+        {"id": "t", "type": "manual", "config": {}},
+        {"id": "c", "type": "condition", "config": {"expression": "False"}},
+        {"id": "yes", "type": "print", "config": {"value": "Y"}},
+        {"id": "no", "type": "http", "config": {"url": "ftp://bad"}},
+    ], "edges": [edge("t", "c"), edge("c", "yes", "true"), edge("c", "no", "false")]}
+    engine = WorkflowEngine(wf, 1, on_progress=lambda n, st, ms: events.append((n, st)))
+    asyncio.run(engine.execute({"input": "x"}))
+    assert events == [("t", "running"), ("t", "done"), ("c", "running"), ("c", "done"),
+                      ("yes", "skipped"), ("no", "running"), ("no", "failed")]

@@ -1,7 +1,7 @@
 """Запуск workflow: проверка лимитов тарифа, загрузка подключений пользователя, выполнение, сохранение."""
 import asyncio
 import traceback
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -10,14 +10,37 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
+from ..database import async_session
 from ..models import Connection, Execution, User, Workflow
 from ..security import decrypt_config
-from ..worker import WorkflowEngine
+from ..worker import WorkflowEngine, is_error_output
 from .google import GOOGLE_PROVIDERS, refresh_if_needed
 from .limits import check_and_count_run, get_user_plan
 from .platform_ai import platform_guard
 
 _running: dict[int, int] = defaultdict(int)
+
+# Прогресс запусков для индикатора на холсте. В памяти процесса: после завершения хранится ещё MAX_TRACKED запусков,
+# для остальных статус восстанавливается из сохранённых логов.
+MAX_TRACKED = 200
+_progress: "OrderedDict[int, dict[str, dict]]" = OrderedDict()
+_background_tasks: set = set()
+
+
+def record_progress(execution_id: int, node_id: str, status: str, duration_ms: Optional[int] = None) -> None:
+    nodes = _progress.setdefault(execution_id, {})
+    nodes[node_id] = {"status": status, "ms": duration_ms}
+    while len(_progress) > MAX_TRACKED:
+        _progress.popitem(last=False)
+
+
+def get_progress(execution: Execution) -> dict[str, dict]:
+    if execution.id in _progress:
+        return _progress[execution.id]
+    return {
+        entry["node_id"]: {"status": "failed" if is_error_output(entry.get("output")) else "done", "ms": None}
+        for entry in (execution.logs or []) if entry.get("node_id")
+    }
 
 
 async def load_connections(db: AsyncSession, user_id: int) -> dict:
@@ -29,10 +52,11 @@ async def load_connections(db: AsyncSession, user_id: int) -> dict:
     return result
 
 
-async def run_workflow(
+async def create_execution(
     db: AsyncSession, user: User, workflow: Workflow, trigger_data: Optional[dict[str, Any]] = None,
     source: str = "manual",
 ) -> Execution:
+    """Проверка лимитов и создание записи запуска (статус running)."""
     if _running[user.id] >= settings.max_parallel_executions_per_user:
         raise HTTPException(429, detail={"code": "too_many_runs", "message": "Слишком много одновременных запусков, дождитесь завершения предыдущих"})
 
@@ -46,11 +70,17 @@ async def run_workflow(
     db.add(execution)
     await db.commit()
     await db.refresh(execution)
+    return execution
 
+
+async def execute_execution(
+    db: AsyncSession, user: User, workflow: Workflow, execution: Execution, trigger_data: Optional[dict[str, Any]] = None,
+) -> Execution:
     connections = await load_connections(db, user.id)
     engine = WorkflowEngine(
         {"name": workflow.name, "nodes": workflow.nodes, "edges": workflow.edges},
         execution.id, connections=connections, llm_guard=platform_guard,
+        on_progress=lambda node_id, status, ms: record_progress(execution.id, node_id, status, ms),
     )
 
     _running[user.id] += 1
@@ -71,6 +101,37 @@ async def run_workflow(
     execution.finished_at = datetime.now(timezone.utc)
     await db.commit()
     return execution
+
+
+async def run_workflow(
+    db: AsyncSession, user: User, workflow: Workflow, trigger_data: Optional[dict[str, Any]] = None,
+    source: str = "manual",
+) -> Execution:
+    execution = await create_execution(db, user, workflow, trigger_data, source)
+    return await execute_execution(db, user, workflow, execution, trigger_data)
+
+
+def start_in_background(execution_id: int, user_id: int, workflow_id: int, trigger_data: Optional[dict[str, Any]]) -> None:
+    """Выполняет уже созданный запуск в фоне (своя сессия БД): ответ клиенту уходит сразу, прогресс читается опросом."""
+    async def job():
+        async with async_session() as db:
+            execution = await db.get(Execution, execution_id)
+            workflow = await db.get(Workflow, workflow_id)
+            user = await db.get(User, user_id)
+            if not (execution and workflow and user):
+                return
+            try:
+                await execute_execution(db, user, workflow, execution, trigger_data)
+            except Exception:
+                traceback.print_exc()
+                execution.status = "failed"
+                execution.result = {"error": "Внутренняя ошибка запуска"}
+                execution.finished_at = datetime.now(timezone.utc)
+                await db.commit()
+
+    task = asyncio.create_task(job())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 
 def _jsonable(value):

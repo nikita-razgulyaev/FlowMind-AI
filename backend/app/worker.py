@@ -2,6 +2,7 @@
 import asyncio
 import json
 import re
+import time
 from datetime import datetime, timezone
 
 import httpx
@@ -62,12 +63,21 @@ def render_value(value) -> str:
     return text[:MAX_RENDER_CHARS]
 
 
+ERROR_OUTPUT_RE = re.compile(r"^[A-Za-z ]{2,30} Error\b")
+
+
+def is_error_output(result) -> bool:
+    """Обработчики нод возвращают сбой строкой «LLM Error: ...», «HTTP Error: ...» — помечаем такую ноду как failed."""
+    return isinstance(result, str) and bool(ERROR_OUTPUT_RE.match(result))
+
+
 def normalize_label(text: str) -> str:
     return re.sub(r"[^\w\s]", "", str(text).casefold()).strip()
 
 
 class WorkflowEngine:
-    def __init__(self, workflow, execution_id, connections: dict = None, llm_guard=None):
+    def __init__(self, workflow, execution_id, connections: dict = None, llm_guard=None, on_progress=None):
+        self.on_progress = on_progress              # (node_id, status, duration_ms|None): running | done | failed | skipped
         self.workflow = workflow
         self.execution_id = execution_id
         self.context = {}
@@ -154,8 +164,16 @@ class WorkflowEngine:
                 continue
             if not self._is_reachable(node["id"]):
                 self.context[node["id"]] = ""      # ветка не выбрана: {node} подставляется пустым, так работает «слияние»
+                self._report(node["id"], "skipped")
                 continue
-            result = await self._execute_node(node, trigger_data)
+            self._report(node["id"], "running")
+            started = time.monotonic()
+            try:
+                result = await self._execute_node(node, trigger_data)
+            except Exception:
+                self._report(node["id"], "failed", started)
+                raise
+            self._report(node["id"], "failed" if is_error_output(result) else "done", started)
             self.executed.add(node["id"])
             self._register_branch(node, result)
             self.context[node["id"]] = result
@@ -167,6 +185,15 @@ class WorkflowEngine:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             })
         return self.context
+
+    def _report(self, node_id: str, status: str, started: float | None = None):
+        """Краткий статус ноды для индикатора выполнения; сбой индикатора не должен ломать запуск."""
+        if not self.on_progress:
+            return
+        try:
+            self.on_progress(node_id, status, None if started is None else int((time.monotonic() - started) * 1000))
+        except Exception:
+            pass
 
     def _apply_test_input(self, trigger_data):
         """Кнопка Run без модалки: пустой вход заменяется тестовыми данными из настроек триггера."""

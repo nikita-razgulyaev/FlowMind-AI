@@ -14,7 +14,7 @@ from ..models import Execution, User, Workflow, utcnow
 from ..schemas import WorkflowCreate, WorkflowResponse
 from ..services import telegram_service
 from ..services.limits import QuotaError, check_workflow_quota, get_user_plan, workflow_flags
-from ..services.runner import run_workflow
+from ..services.runner import create_execution, get_progress, run_workflow, start_in_background
 from ..templates import TEMPLATES
 
 router = APIRouter(tags=["workflows"])
@@ -162,6 +162,25 @@ async def execute_workflow(workflow_id: int, trigger_data: Optional[Dict[str, An
     wf = await _get_own(db, user, workflow_id)
     execution = await run_workflow(db, user, wf, trigger_data or {}, source="manual")
     return {"execution_id": execution.id, "status": execution.status, "result": execution.result}
+
+
+@router.post("/workflows/{workflow_id}/execute-async")
+async def execute_workflow_async(workflow_id: int, trigger_data: Optional[Dict[str, Any]] = None,
+                                 user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Запуск в фоне: сразу отдаёт execution_id, ход выполнения — через GET /executions/{id}/progress."""
+    wf = await _get_own(db, user, workflow_id)
+    execution = await create_execution(db, user, wf, trigger_data or {}, source="manual")
+    start_in_background(execution.id, user.id, wf.id, trigger_data or {})
+    return {"execution_id": execution.id, "status": execution.status}
+
+
+@router.get("/executions/{execution_id}/progress")
+async def execution_progress(execution_id: int, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    execution = await db.get(Execution, execution_id)
+    if not execution or execution.user_id != user.id:
+        raise HTTPException(404, "Execution not found")
+    await db.refresh(execution)
+    return {"status": execution.status, "nodes": get_progress(execution)}
 
 
 # ───────── шаблоны ─────────

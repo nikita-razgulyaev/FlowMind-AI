@@ -199,3 +199,22 @@ def test_webhook_trigger_and_template_creation(client):
 
     for key in ("meeting_summary", "request_router"):
         assert s.post(f"/workflows/from-template/{key}").status_code == 200
+
+
+def test_async_execute_exposes_progress(client):
+    import time
+    s = register(client)
+    wf = s.post("/workflows/", json={
+        "name": "progress", "description": "", "is_active": False,
+        "nodes": [{"id": "a", "type": "manual", "config": {}}, {"id": "b", "type": "print", "config": {"value": "hi"}}],
+        "edges": [{"id": "e", "from_node": "a", "to_node": "b", "type": "next"}],
+    }).json()
+    started = s.post(f"/workflows/{wf['id']}/execute-async", json={"input": ""}).json()
+    assert started["status"] == "running"
+    for _ in range(50):
+        progress = s.get(f"/executions/{started['execution_id']}/progress").json()
+        if progress["status"] != "running":
+            break
+        time.sleep(0.1)
+    assert progress["status"] == "success"
+    assert {k: v["status"] for k, v in progress["nodes"].items()} == {"a": "done", "b": "done"}

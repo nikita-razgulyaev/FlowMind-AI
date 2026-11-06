@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { createContext, useContext, useEffect } from "react";
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 import {
     Play,
@@ -16,7 +16,31 @@ import {
     Split,
     Variable,
     FileText,
+    Check,
+    Loader2,
+    X,
 } from "lucide-react";
+
+export type NodeRunStatus = "running" | "done" | "failed" | "skipped";
+export interface NodeRunState {
+    status: NodeRunStatus;
+    ms: number | null;
+}
+
+/** Краткий статус выполнения нод по id; null — запуска нет. Передаётся контекстом, чтобы не попадать в сохраняемые данные нод. */
+export const RunProgressContext = createContext<Record<string, NodeRunState> | null>(null);
+
+function formatDuration(ms: number | null): string {
+    if (ms === null) return "";
+    return ms < 1000 ? `${ms} мс` : `${(ms / 1000).toFixed(1).replace(".", ",")} с`;
+}
+
+const RUN_BADGE: Record<NodeRunStatus, { ring: string; pill: string; label: string }> = {
+    running: { ring: "!border-blue-500 ring-4 ring-blue-200 animate-pulse", pill: "bg-blue-600 text-white", label: "выполняется" },
+    done: { ring: "!border-emerald-500", pill: "bg-emerald-600 text-white", label: "" },
+    failed: { ring: "!border-red-500 ring-2 ring-red-200", pill: "bg-red-600 text-white", label: "ошибка" },
+    skipped: { ring: "opacity-45", pill: "bg-gray-400 text-white", label: "пропущена" },
+};
 
 /** Префикс id source-handle ветки: `out-c:<метка>`; метка попадает в edge.condition. */
 export const BRANCH_HANDLE_PREFIX = "out-c:";
@@ -205,6 +229,8 @@ export default function CanvasNode({ id, type, data, selected }: NodeProps) {
     const isTrigger =
         type === "manual" || type === "schedule" || type === "telegram_trigger" || type === "webhook";
     const isAgent = type === "agent";
+    const runState = useContext(RunProgressContext)?.[id];
+    const badge = runState ? RUN_BADGE[runState.status] : null;
     const branches = getBranches(type as string, config);
     const updateNodeInternals = useUpdateNodeInternals();
     useEffect(() => {
@@ -213,10 +239,21 @@ export default function CanvasNode({ id, type, data, selected }: NodeProps) {
 
     return (
         <div
-            className={`relative w-64 rounded-xl border-2 bg-white shadow-sm ${
+            className={`relative w-64 rounded-xl border-2 bg-white shadow-sm transition-all ${
                 selected ? "border-blue-400 shadow-md" : meta.ring
-            }`}
+            } ${badge?.ring ?? ""}`}
         >
+            {runState && (
+                <span
+                    className={`absolute -top-2.5 right-3 z-10 flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium shadow ${badge!.pill}`}
+                >
+                    {runState.status === "running" && <Loader2 className="w-3 h-3 animate-spin" />}
+                    {runState.status === "done" && <Check className="w-3 h-3" />}
+                    {runState.status === "failed" && <X className="w-3 h-3" />}
+                    {badge!.label || formatDuration(runState.ms)}
+                    {runState.status === "failed" && runState.ms !== null && ` · ${formatDuration(runState.ms)}`}
+                </span>
+            )}
             {!isTrigger && (
                 <Handle
                     type="target"

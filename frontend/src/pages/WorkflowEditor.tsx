@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import {
     ReactFlow,
@@ -19,7 +19,13 @@ import "@xyflow/react/dist/style.css";
 import { Save, Play, Sparkles, Terminal } from "lucide-react";
 import { api } from "../api/client";
 import type { WorkflowNode, WorkflowEdge } from "../types/workflow";
-import CanvasNode, { BRANCH_HANDLE_PREFIX, MINIMAP_COLORS, branchColor } from "../components/canvas/CanvasNode";
+import CanvasNode, {
+    BRANCH_HANDLE_PREFIX,
+    MINIMAP_COLORS,
+    RunProgressContext,
+    branchColor,
+    type NodeRunState,
+} from "../components/canvas/CanvasNode";
 import NodePalette from "../components/canvas/NodePalette";
 import MiniMapNode from "../components/canvas/MiniMapNode";
 import NodeConfigPanel from "../components/canvas/NodeConfigPanel";
@@ -189,6 +195,10 @@ export default function WorkflowEditor() {
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [runStatus, setRunStatus] = useState<string | null>(null);
+    const [runProgress, setRunProgress] = useState<Record<string, NodeRunState> | null>(null);
+    const [isRunning, setIsRunning] = useState(false);
+    const [runFinished, setRunFinished] = useState(false);
+    const pollTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
     const [showLog, setShowLog] = useState(logParam !== null);
     const [showAiChat, setShowAiChat] = useState(false);
     const [isActive, setIsActive] = useState(true);
@@ -261,6 +271,23 @@ export default function WorkflowEditor() {
         setNodes((nds) => [...nds, newNode]);
         setSelectedId(newId);
     };
+
+    /** Связи по ходу запуска: данные «текут» (анимация) от выполненной ноды к следующей, невыбранные ветки тускнеют. */
+    const displayEdges = useMemo(() => {
+        if (!runProgress) return edges;
+        return edges.map((e) => {
+            const from = runProgress[e.source]?.status;
+            const to = runProgress[e.target]?.status;
+            const targetSkipped = to === "skipped" || (runFinished && !to);
+            if (from === "done" && !targetSkipped) {
+                return { ...e, animated: true, style: { ...e.style, stroke: "#10b981", strokeWidth: 2.5 } };
+            }
+            if (from === "skipped" || targetSkipped) {
+                return { ...e, animated: false, style: { ...e.style, opacity: 0.25 } };
+            }
+            return e;
+        });
+    }, [edges, runProgress, runFinished]);
 
     const onConnect = useCallback(
         (connection: Connection) => {
@@ -357,21 +384,44 @@ export default function WorkflowEditor() {
     };
 
     /** Run без модалки: тестовые данные берутся из настроек триггера (поле «Тестовые данные»). */
+    useEffect(() => () => clearTimeout(pollTimer.current), []);
+
+    /** Запуск в фоне + опрос прогресса: ноды на холсте показывают краткий статус по ходу выполнения. */
     const runWorkflow = async () => {
+        clearTimeout(pollTimer.current);
         setRunStatus("Выполняется...");
-        const { data, error } = await api.executeWorkflow(Number(id), {
-            input: "",
-        });
-        if (data) {
-            setRunStatus(
-                `Готово — execution #${data.execution_id} (${data.status})`,
-            );
-            await loadExecutions();
-            setFocusExecutionId(data.execution_id);
-            setShowAiChat(false);
-            setShowLog(true);
+        setRunProgress({});
+        setRunFinished(false);
+        setIsRunning(true);
+        const { data, error } = await api.executeWorkflowAsync(Number(id), { input: "" });
+        if (error || !data) {
+            setRunStatus(`Ошибка: ${error}`);
+            setRunProgress(null);
+            setIsRunning(false);
+            return;
         }
-        if (error) setRunStatus(`Ошибка: ${error}`);
+
+        const poll = async (attempt: number) => {
+            const { data: progress } = await api.getExecutionProgress(data.execution_id);
+            if (progress) setRunProgress(progress.nodes as Record<string, NodeRunState>);
+            if (progress && progress.status !== "running") {
+                setRunStatus(`Готово — execution #${data.execution_id} (${progress.status})`);
+                setRunFinished(true);
+                setIsRunning(false);
+                await loadExecutions();
+                setFocusExecutionId(data.execution_id);
+                setShowAiChat(false);
+                setShowLog(true);
+                return;
+            }
+            if (attempt > 600) {   // ~5 минут без завершения — перестаём ждать, запуск продолжится на сервере
+                setRunStatus("Запуск продолжается на сервере — смотри историю выполнений");
+                setIsRunning(false);
+                return;
+            }
+            pollTimer.current = setTimeout(() => poll(attempt + 1), 500);
+        };
+        poll(0);
     };
 
     const handleExecute = async () => {
@@ -379,6 +429,7 @@ export default function WorkflowEditor() {
             alert("Сохрани workflow перед запуском");
             return;
         }
+        if (isRunning) return;
         await runWorkflow();
     };
 
@@ -447,7 +498,7 @@ export default function WorkflowEditor() {
                         </button>
                         <button
                             onClick={handleExecute}
-                            disabled={!isEditing}
+                            disabled={!isEditing || isRunning}
                             className="flex items-center gap-2 px-4 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm font-medium"
                         >
                             <Play className="w-4 h-4" /> Run
@@ -467,10 +518,11 @@ export default function WorkflowEditor() {
 
                 <div className="flex-1 flex min-h-0">
                     <div className="flex-1 relative">
+                        <RunProgressContext.Provider value={runProgress}>
                         <ReactFlowProvider>
                             <ReactFlow
                                 nodes={nodes}
-                                edges={edges}
+                                edges={displayEdges}
                                 onNodesChange={onNodesChange}
                                 onEdgesChange={onEdgesChange}
                                 onConnect={onConnect}
@@ -480,7 +532,10 @@ export default function WorkflowEditor() {
                                     setSelectedId(n.id);
                                     setShowAiChat(false);
                                 }}
-                                onPaneClick={() => setSelectedId(null)}
+                                onPaneClick={() => {
+                                    setSelectedId(null);
+                                    if (runFinished) setRunProgress(null);
+                                }}
                                 deleteKeyCode={["Backspace", "Delete"]}
                                 minZoom={0.1}
                                 maxZoom={1.5}
@@ -502,6 +557,7 @@ export default function WorkflowEditor() {
                                 />
                             </ReactFlow>
                         </ReactFlowProvider>
+                        </RunProgressContext.Provider>
 
                         {nodes.length === 0 && (
                             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">

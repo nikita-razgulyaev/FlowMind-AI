@@ -157,6 +157,14 @@ class ApiClient {
         return request<{ execution_id: number; status: string; result: any }>(
             `/workflows/${id}/execute`, json("POST", triggerData || {}));
     }
+    executeWorkflowAsync(id: number, triggerData?: Record<string, any>) {
+        return request<{ execution_id: number; status: string }>(
+            `/workflows/${id}/execute-async`, json("POST", triggerData || {}));
+    }
+    getExecutionProgress(id: number) {
+        return request<{ status: string; nodes: Record<string, { status: string; ms: number | null }> }>(
+            `/executions/${id}/progress`);
+    }
     getWebhookUrl(id: number) { return request<{ url: string }>(`/workflows/${id}/webhook-url`); }
     createFromTemplate(templateName: string) { return request<Workflow>(`/workflows/from-template/${templateName}`, json("POST")); }
     getExecutions(workflowId?: number) {
