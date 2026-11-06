@@ -81,7 +81,7 @@ export default function Landing() {
                 </div>
             </section>
 
-            <section className="bg-gray-50">
+            <section id="how" className="scroll-mt-20 bg-gray-50">
                 <div className="max-w-6xl mx-auto px-6 py-20">
                     <h2 className="text-3xl font-extrabold text-center">{t("landing.howTitle")}</h2>
                     <ol className="mt-12 grid md:grid-cols-3 gap-8">

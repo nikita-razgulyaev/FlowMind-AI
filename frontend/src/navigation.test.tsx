@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
+import { hardNavigate } from "./utils/navigation";
 import App from "./App";
 import "./i18n";
 import { setAccessToken } from "./api/client";
@@ -55,31 +56,41 @@ beforeEach(() => {
     setAccessToken(null);
     useAuth.setState({ ready: false, config: null, me: null });
 });
+vi.mock("./utils/navigation", () => ({ hardNavigate: vi.fn() }));
+
 afterEach(() => cleanup());
 
 describe("навигация для гостя", () => {
-    it("лендинг → тарифы → якорь «Возможности» → вход → логотип", async () => {
+    it("лендинг → скролл к тарифам → якорь «Возможности» → вход → логотип", async () => {
         const user = userEvent.setup();
         await openApp("/", false);
         expect(await screen.findByRole("heading", { level: 1, name: /Собирайте AI-автоматизации/ })).toBeTruthy();
 
-        await user.click(header().getByRole("link", { name: "Тарифы" }));
-        expect(await screen.findByRole("heading", { level: 1, name: "Тарифы" })).toBeTruthy();
-        expect(await screen.findByText("Возможность тарифа Про")).toBeTruthy();
-        expect(screen.queryByText("Сравнение тарифов")).toBeNull();                    // таблицы сравнения больше нет
+        const lastScrollTarget = () =>
+            (Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>).mock.contexts.at(-1) as HTMLElement;
+
+        await user.click(header().getByRole("link", { name: "Тарифы" }));                // скролл к блоку тарифов на лендинге
+        await waitFor(() => expect(lastScrollTarget()?.id).toBe("pricing"));
+        expect(await screen.findByRole("heading", { level: 2, name: "Тарифы" })).toBeTruthy();
         expect(header().getByRole("link", { name: "Тарифы" }).getAttribute("aria-current")).toBe("page");
 
-        await user.click(header().getByRole("link", { name: "Возможности" }));           // с /pricing на якорь лендинга
-        expect(await screen.findByRole("heading", { level: 1, name: /Собирайте AI-автоматизации/ })).toBeTruthy();
-        await waitFor(() => expect(Element.prototype.scrollIntoView).toHaveBeenCalled());
-        const scrolledTo = (Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>).mock.contexts.at(-1) as HTMLElement;
-        expect(scrolledTo.id).toBe("features");
+        await user.click(header().getByRole("link", { name: "Возможности" }));           // якорь на той же странице
+        await waitFor(() => expect(lastScrollTarget()?.id).toBe("features"));
+
+        await user.click(header().getByRole("link", { name: "Как работает" }));
+        await waitFor(() => expect(lastScrollTarget()?.id).toBe("how"));
+
+        await user.click(header().getByRole("link", { name: "Тарифы" }));                // повторный клик по тому же якорю тоже скроллит
+        await waitFor(() => expect(lastScrollTarget()?.id).toBe("pricing"));
 
         await user.click(header().getByRole("link", { name: "Войти" }));
         expect(await screen.findByRole("heading", { name: "Вход в FlowMind AI" })).toBeTruthy();
 
-        await user.click(screen.getByRole("link", { name: /FlowMind AI/ }));              // логотип возвращает на главную
+        await user.click(screen.getByRole("link", { name: /FlowMind AI/ }));              // логотип на странице входа возвращает на главную
         expect(await screen.findByRole("heading", { level: 1, name: /Собирайте AI-автоматизации/ })).toBeTruthy();
+
+        await user.click(header().getByRole("link", { name: /FlowMind AI/ }));            // логотип в шапке лендинга перезагружает страницу
+        expect(hardNavigate).toHaveBeenCalledWith("/about");
     });
 
     it("выбор платного тарифа ведёт на регистрацию, а закрытые страницы — на вход", async () => {
@@ -102,14 +113,15 @@ describe("навигация для вошедшего", () => {
         expect(await screen.findByTitle("Воркфлоу")).toBeTruthy();                        // это приложение (боковая панель), а не лендинг
         expect(screen.queryByRole("heading", { name: /Собирайте AI-автоматизации/ })).toBeNull();
 
+        await user.click(screen.getByTitle("Личный кабинет"));                           // кабинет — в боковой панели приложения
+        expect(await screen.findByRole("heading", { name: "Личный кабинет" })).toBeTruthy();
+
         await user.click(screen.getByTitle("Тарифы"));
         expect(await screen.findByRole("heading", { level: 1, name: "Тарифы" })).toBeTruthy();
         expect(await screen.findByText("Текущий тариф")).toBeTruthy();                    // у вошедшего отмечен его тариф
+        expect(header().queryByRole("link", { name: "Личный кабинет" })).toBeNull();      // в шапке лендинга кабинета нет
 
-        await user.click(header().getByRole("link", { name: "Личный кабинет" }));
-        expect(await screen.findByRole("heading", { name: "Личный кабинет" })).toBeTruthy();
-
-        await user.click(screen.getByTitle("О сервисе"));
+        await user.click(header().getByRole("link", { name: "Возможности" }));
         expect(await screen.findByRole("heading", { level: 1, name: /Собирайте AI-автоматизации/ })).toBeTruthy();
         await user.click(header().getByRole("link", { name: "Открыть приложение" }));
         expect(await screen.findByTitle("Воркфлоу")).toBeTruthy();

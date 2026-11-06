@@ -276,6 +276,7 @@
   },
   "landing": {
     "navFeatures": "Возможности",
+        "navHow": "Как работает",
     "navPricing": "Тарифы",
     "navFaq": "Вопросы",
     "openApp": "Открыть приложение",

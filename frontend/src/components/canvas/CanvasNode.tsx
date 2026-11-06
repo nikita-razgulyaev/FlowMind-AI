@@ -266,14 +266,17 @@ export default function CanvasNode({ id, type, data, selected }: NodeProps) {
 
             <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-100">
                 <span
-                    className={`w-7 h-7 rounded-lg flex items-center justify-center ${meta.badge}`}
+                    className={`w-7 h-7 shrink-0 rounded-lg flex items-center justify-center ${meta.badge}`}
                 >
                     <Icon className="w-4 h-4" />
                 </span>
-                <span className="text-sm font-semibold text-gray-800">
+                <span className="shrink-0 whitespace-nowrap text-sm font-semibold text-gray-800">
                     {meta.label}
                 </span>
-                <span className="ml-auto text-[10px] font-mono text-gray-400">
+                <span
+                    title={id}
+                    className="ml-auto min-w-0 truncate text-[10px] font-mono text-gray-400"
+                >
                     {id}
                 </span>
             </div>

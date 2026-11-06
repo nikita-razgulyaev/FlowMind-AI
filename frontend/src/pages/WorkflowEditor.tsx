@@ -27,6 +27,7 @@ import CanvasNode, {
     type NodeRunState,
 } from "../components/canvas/CanvasNode";
 import NodePalette from "../components/canvas/NodePalette";
+import { useGraphHistory } from "../hooks/useGraphHistory";
 import MiniMapNode from "../components/canvas/MiniMapNode";
 import NodeConfigPanel from "../components/canvas/NodeConfigPanel";
 import EditorSidebar from "../components/canvas/EditorSidebar";
@@ -195,6 +196,21 @@ export default function WorkflowEditor() {
     const [descriptionDraft, setDescriptionDraft] = useState<string | null>(null);   // не null — модалка открыта
     const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+    const lastConfigEdit = useRef({ id: "", at: 0 });
+    const { snapshot, reset: resetHistory } = useGraphHistory(nodes, edges, (prevNodes, prevEdges) => {
+        setNodes(prevNodes);
+        setEdges(prevEdges);
+        setSelectedId((current) => (prevNodes.some((n) => n.id === current) ? current : null));
+    });
+
+    const handleNodesChange: typeof onNodesChange = (changes) => {
+        if (changes.some((c) => c.type === "remove")) snapshot();
+        onNodesChange(changes);
+    };
+    const handleEdgesChange: typeof onEdgesChange = (changes) => {
+        if (changes.some((c) => c.type === "remove")) snapshot();
+        onEdgesChange(changes);
+    };
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [runStatus, setRunStatus] = useState<string | null>(null);
@@ -256,6 +272,7 @@ export default function WorkflowEditor() {
             setDescription(data.description);
             setIsActive(data.is_active);
             setNodes(data.nodes.map(toFlowNode));
+            resetHistory();
             // edges после nodes: handles должны успеть смонтироваться
             const mapped = (data.edges || []).map(toFlowEdge);
             requestAnimationFrame(() => setEdges(mapped));
@@ -268,6 +285,7 @@ export default function WorkflowEditor() {
     };
 
     const addNode = (type: string) => {
+        snapshot();
         const newId = genId(type);
         const count = nodes.length;
         const newNode: Node = {
@@ -304,6 +322,7 @@ export default function WorkflowEditor() {
 
     const onConnect = useCallback(
         (connection: Connection) => {
+            snapshot();
             const handle = connection.sourceHandle || "out-next";
             const isTool = handle === "out-tool";
             const branch = handle.startsWith(BRANCH_HANDLE_PREFIX)
@@ -323,11 +342,15 @@ export default function WorkflowEditor() {
                 ),
             );
         },
-        [setEdges],
+        [setEdges, snapshot],
     );
 
     const updateSelectedConfig = (config: Record<string, any>) => {
         if (!selectedId) return;
+        // подряд идущие правки одной ноды (набор текста) — одна точка отката
+        const now = Date.now();
+        if (lastConfigEdit.current.id !== selectedId || now - lastConfigEdit.current.at > 1000) snapshot();
+        lastConfigEdit.current = { id: selectedId, at: now };
         setNodes((nds) =>
             nds.map((n) =>
                 n.id === selectedId ? { ...n, data: { ...n.data, config } } : n,
@@ -337,6 +360,7 @@ export default function WorkflowEditor() {
 
     const deleteSelected = () => {
         if (!selectedId) return;
+        snapshot();
         setNodes((nds) => nds.filter((n) => n.id !== selectedId));
         setEdges((eds) =>
             eds.filter(
@@ -374,6 +398,7 @@ export default function WorkflowEditor() {
     });
 
     const applyAiGraph = (graph: { nodes: any[]; edges: any[] }) => {
+        snapshot();
         setNodes(graph.nodes.map(toFlowNode));
         const mapped = (graph.edges || []).map(toFlowEdge);
         requestAnimationFrame(() => setEdges(mapped));
@@ -540,21 +565,6 @@ export default function WorkflowEditor() {
                         >
                             <Terminal className="w-4 h-4" /> Лог
                         </button>
-                        {hasListener && (
-                            <button
-                                onClick={isRunning ? stopRun : runWorkflow}
-                                disabled={!isEditing || (!isRunning && isToggling)}
-                                title="Разовый запуск с тестовыми данными из триггера"
-                                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium border disabled:opacity-50 ${
-                                    isRunning
-                                        ? "border-red-300 bg-red-50 text-red-700 hover:bg-red-100"
-                                        : "border-gray-200 text-gray-600 hover:bg-gray-50"
-                                }`}
-                            >
-                                {isRunning ? <Square className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                                {isRunning ? "Стоп теста" : "Тест"}
-                            </button>
-                        )}
                         {hasListener ? (
                             <button
                                 onClick={toggleActive}
@@ -598,9 +608,10 @@ export default function WorkflowEditor() {
                             <ReactFlow
                                 nodes={nodes}
                                 edges={displayEdges}
-                                onNodesChange={onNodesChange}
-                                onEdgesChange={onEdgesChange}
+                                onNodesChange={handleNodesChange}
+                                onEdgesChange={handleEdgesChange}
                                 onConnect={onConnect}
+                                onNodeDragStart={() => snapshot()}
                                 isValidConnection={(c) => c.source !== c.target}
                                 nodeTypes={nodeTypes}
                                 onNodeClick={(_, n) => {
