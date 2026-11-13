@@ -48,7 +48,8 @@ FlowMind AI — no-code редактор для сборки AI-агентов �
 - **Telegram-триггер.** Сценарий запускается входящим сообщением боту; `Telegram Send` с пустым `chat_id` отвечает в тот же чат. Доступны переменные `{input}`, `{telegram_chat_id}`, `{telegram_username}`, `{telegram_first_name}`. В облаке — через webhook, локально — через long polling.
 - **AI-чат в редакторе.** Опишите сценарий словами («Telegram-бот поддержки с агентом, который ищет заказ по HTTP») — ассистент соберёт или изменит граф; вы нажимаете «Применить к холсту», проверяете и сохраняете. Также отвечает на вопросы по работе сервиса.
 - **Подключения** с шифрованием секретов (API-ключи, токены ботов, Google-токены) и маскировкой в интерфейсе.
-- **История выполнений** с читаемым чат-логом: диалог агента и вызовы инструментов.
+- **История выполнений** с читаемым чат-логом: диалог агента и вызовы инструментов. Если хотя бы один шаг упал (например, `LLM Error`, сбой HTTP или Telegram), **весь запуск** помечается как неуспешный (красный статус), а не «успешно».
+- **Бренд:** знак «ветвление» (один вход → три результата) в favicon, шапке лендинга и на страницах входа; варианты логотипа — `frontend/public/logo-variants.svg`.
 - **Шаблоны** готовых сценариев, **настройки по умолчанию** (хранятся в вашем аккаунте).
 - **Аккаунты:** регистрация, вход, сброс пароля, подтверждение email (опционально), личный кабинет.
 - **Подписки:** три тарифа, помесячная и годовая оплата со скидкой 20%, апгрейд с зачётом остатка, отложенное понижение, отмена, автопродление, льготный период при неудачном списании.
@@ -64,9 +65,9 @@ FlowMind AI — no-code редактор для сборки AI-агентов �
 |---|---|---|
 | Регистрация и вход | да | нет — работает сразу |
 | Тарифы и оплата | да | нет — безлимитный «локальный» тариф |
-| База данных | PostgreSQL (рекомендуется) | SQLite (файл) |
+| База данных | PostgreSQL | SQLite |
 | Локальные модели (Ollama) | недоступны | да, по умолчанию |
-| LLM по умолчанию | AI сервиса (ключ Hugging Face) или свои ключи | Ollama |
+| LLM по умолчанию | AI сервиса или свои ключи | Ollama |
 | Telegram-триггер | webhook (нужен публичный HTTPS-адрес) | long polling (адрес не нужен) |
 | Защита HTTP-ноды от запросов во внутреннюю сеть | включена | выключена |
 | Админ-панель, лендинг | да | не показываются |
@@ -180,6 +181,8 @@ GOOGLE_CLIENT_SECRET=...
    source venv/bin/activate            # Windows: venv\Scripts\activate
    pip install -r requirements.txt
    cp .env.example .env                # по умолчанию уже DEPLOYMENT_MODE=local
+   # Если включаете AUTH_ENABLED=true — задайте SECRET_KEY (не оставляйте пустым):
+   # SECRET_KEY=$(python -c "import secrets; print(secrets.token_urlsafe(48))")
    uvicorn app.main:app --reload --port 8000
    ```
    Миграции БД применяются автоматически при старте. Документация API: <http://localhost:8000/api/docs>.
@@ -319,7 +322,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
 | `DEPLOYMENT_MODE` | `local` / `cloud` |
 | `AUTH_ENABLED` | принудительно включить/выключить вход (по умолчанию: cloud — вкл., local — выкл.) |
 | `DATABASE_URL` | SQLite или PostgreSQL (`postgresql://…`, `postgres://…` тоже принимается) |
-| `SECRET_KEY`, `ENCRYPTION_KEY` | подпись токенов и шифрование секретов |
+| `SECRET_KEY`, `ENCRYPTION_KEY` | подпись JWT и шифрование секретов. Пустой `SECRET_KEY=` в `.env` не принимается: подставляется dev-значение (иначе вход падает с `HMAC key must not be empty`). В облаке задайте длинную случайную строку: `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
 | `PUBLIC_BASE_URL` | публичный адрес (вебхуки, возврат с оплаты); на Render берётся автоматически |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | администратор |
 | `REQUIRE_EMAIL_VERIFICATION`, `SMTP_*` | подтверждение email и отправка писем |
@@ -388,8 +391,9 @@ FlowMind-AI/
 │       ├── api/client.ts        # клиент API (токены, автообновление сессии)
 │       ├── store/auth.ts        # конфиг развёртывания, текущий пользователь
 │       ├── i18n/                # словарь интерфейса
-│       ├── components/          # canvas/, auth/, billing/, common/
+│       ├── components/          # canvas/, auth/, billing/, common/, LogoIcon.tsx
 │       └── pages/               # Landing, Login, Register, Pricing, Checkout, Account, admin/, WorkflowEditor, ...
+│   └── public/                  # favicon.svg (знак «ветвление»), logo-variants.svg, icons.svg
 ├── deploy/Caddyfile
 ├── Dockerfile                   # фронтенд + backend в одном образе
 ├── docker-compose.yml           # локально: приложение + Ollama

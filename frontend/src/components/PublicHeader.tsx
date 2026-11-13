@@ -1,10 +1,11 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Menu, Workflow, X } from "lucide-react";
+import { Menu, X } from "lucide-react";
 import { useAuth } from "../store/auth";
 import { Button } from "./common/ui";
 import { hardNavigate } from "../utils/navigation";
+import LogoIcon from "./LogoIcon";
 
 /** Шапка «презентационных» страниц (лендинг, тарифы). Ссылки с якорями ведут на /about — страницу, доступную всем. */
 export default function PublicHeader() {
@@ -55,8 +56,8 @@ export default function PublicHeader() {
         <header className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-gray-100">
             <div className="max-w-6xl mx-auto px-6 h-16 flex items-center gap-8">
                 <a href="/about" onClick={handleLogoClick} className="flex items-center gap-2 font-bold text-gray-900">
-                    <span className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center">
-                        <Workflow className="w-4 h-4" />
+                    <span className="w-8 h-8 rounded-lg text-blue-600 flex items-center justify-center overflow-hidden">
+                        <LogoIcon className="w-8 h-8" />
                     </span>
                     FlowMind AI
                 </a>

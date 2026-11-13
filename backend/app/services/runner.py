@@ -87,8 +87,24 @@ async def execute_execution(
     _running[user.id] += 1
     try:
         result = await asyncio.wait_for(engine.execute(trigger_data), timeout=settings.max_execution_seconds)
-        execution.status = "success"
-        execution.result = _jsonable(result)
+        # Ошибки нод (LLM Error, HTTP Error и т.п.) не бросают исключение — движок продолжает.
+        # Если хотя бы один шаг упал, сценарий считаем неуспешным (красный статус в истории).
+        error_outputs = [
+            entry.get("output")
+            for entry in engine.logs
+            if is_error_output(entry.get("output"))
+        ]
+        progress_nodes = _progress.get(execution.id, {})
+        has_failed_progress = any(s.get("status") == "failed" for s in progress_nodes.values())
+        if error_outputs or has_failed_progress:
+            execution.status = "failed"
+            payload = result if isinstance(result, dict) else {"result": result}
+            if isinstance(payload, dict) and "error" not in payload:
+                payload = {**payload, "error": error_outputs[0] if error_outputs else "Один или несколько шагов завершились с ошибкой"}
+            execution.result = _jsonable(payload)
+        else:
+            execution.status = "success"
+            execution.result = _jsonable(result)
     except asyncio.CancelledError:                 # кнопка «Стоп»
         execution.status = "cancelled"
         execution.result = {"error": "Остановлено пользователем"}

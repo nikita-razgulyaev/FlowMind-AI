@@ -7,7 +7,7 @@ import os
 from functools import lru_cache
 from typing import Optional
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL, make_url
 
@@ -72,6 +72,14 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
     public_base_url: str = ""                 # https://flowmind.example.com (нужен для вебхуков и возврата с оплаты)
     frontend_url: str = "http://localhost:5173"
+
+    @field_validator("secret_key", mode="before")
+    @classmethod
+    def _secret_key_not_empty(cls, v):
+        """Пустой SECRET_KEY= в .env не должен затирать дефолт — иначе JWT падает с InvalidKeyError."""
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return "dev-insecure-change-me"
+        return v
 
     # --- аккаунты ---
     admin_email: str = ""

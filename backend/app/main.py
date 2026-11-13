@@ -37,8 +37,13 @@ async def lifespan(app: FastAPI):
                 log.error("Продолжаю без успешной инициализации БД — /api/health вернёт 503")
             else:
                 await asyncio.sleep(min(2 ** attempt, 15))
-    if settings.is_cloud and settings.secret_key == "dev-insecure-change-me":
-        log.warning("SECRET_KEY не задан — используется небезопасное значение по умолчанию!")
+    if not settings.secret_key or not settings.secret_key.strip():
+        log.error("SECRET_KEY пуст — вход и JWT работать не будут. Задайте SECRET_KEY в .env")
+    elif settings.secret_key == "dev-insecure-change-me":
+        if settings.is_cloud:
+            log.warning("SECRET_KEY не задан — используется небезопасное значение по умолчанию!")
+        else:
+            log.info("SECRET_KEY не задан — локальный dev-ключ. Для облака задайте длинную случайную строку.")
     scheduler = asyncio.create_task(scheduler_loop())
     if settings.effective_telegram_mode == "polling":
         poller.start()
