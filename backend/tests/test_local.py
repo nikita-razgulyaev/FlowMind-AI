@@ -35,7 +35,7 @@ def test_ollama_generation(client, fake_net):
     out = client.post(f"{API}/workflows/{wid}/execute", json={"input": "мир"}).json()
     assert out["status"] == "success"
     assert out["result"]["l"].startswith("ollama:qwen2.5:Скажи: мир")      # модель по умолчанию из OLLAMA_MODEL
-    assert not [r for r in fake_net.requests if r.url.host == "api.orcarouter.ai"]
+    assert not [r for r in fake_net.requests if r.url.host == "routerai.ru"]
 
 
 def test_templates_switch_to_ollama(client):

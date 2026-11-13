@@ -12,7 +12,7 @@ os.environ["DEPLOYMENT_MODE"] = TEST_MODE
 os.environ["SECRET_KEY"] = "test-secret-key-for-pytest-only-0123456789"
 os.environ["ADMIN_EMAIL"] = "boss@example.com"
 os.environ["DEMO_MODE"] = "true"
-os.environ["ORCAROUTER_API_KEY"] = "test-platform-key"
+os.environ["ROUTERAI_API_KEY"] = "test-platform-key"
 os.environ["PAYMENT_PROVIDER"] = "mock"
 os.environ["PUBLIC_BASE_URL"] = "https://flowmind.test" if TEST_MODE == "cloud" else ""
 os.environ.pop("AUTH_ENABLED", None)

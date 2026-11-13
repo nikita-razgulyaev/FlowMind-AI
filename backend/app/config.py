@@ -31,9 +31,9 @@ def normalize_database_url(raw: str) -> tuple[URL, dict]:
     return url, connect_args
 
 
-# Основная модель по умолчанию: OrcaRouter, бесплатная DeepSeek V4 Flash (контекст 1M, вызов инструментов, JSON). Ключ берётся из ORCAROUTER_API_KEY.
+# Основная модель по умолчанию: RouterAI, qwen/qwen3.8-27b. Ключ берётся из ROUTERAI_API_KEY.
 DEFAULT_PLATFORM_LLM_PROVIDERS = [
-    {"name": "orcarouter", "base_url": "https://api.orcarouter.ai/v1", "model": "deepseek/deepseek-v4-flash-free", "api_key_env": "ORCAROUTER_API_KEY"},
+    {"name": "routerai", "base_url": "https://routerai.ru/api/v1", "model": "qwen/qwen3.8-27b", "api_key_env": "ROUTERAI_API_KEY"},
 ]
 
 
@@ -107,7 +107,7 @@ class Settings(BaseSettings):
     ollama_model: str = "qwen2.5"
     # Все модели встроенного AI одним списком, первая — основная, остальные запасные (переключение при сбое).
     # JSON: [{"name": "...", "base_url": "https://.../v1", "model": "...", "api_key_env": "ИМЯ_ПЕРЕМЕННОЙ"}], вместо api_key_env можно указать api_key.
-    # Если список не задан, используется модель по умолчанию (DEFAULT_PLATFORM_LLM_PROVIDERS) с ключом из ORCAROUTER_API_KEY.
+    # Если список не задан, используется модель по умолчанию (DEFAULT_PLATFORM_LLM_PROVIDERS) с ключом из ROUTERAI_API_KEY.
     platform_llm_providers_raw: str = Field(default="", validation_alias=AliasChoices("PLATFORM_LLM_PROVIDERS"))
     ai_daily_cap: int = 5000                  # общий суточный потолок запросов к ключу платформы
     platform_llm_cooldown_seconds: int = 60   # на сколько отложить провайдера после сбоя (при повторных сбоях растёт, максимум 10 минут)

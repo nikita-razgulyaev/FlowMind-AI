@@ -68,15 +68,15 @@ def test_one_list_first_is_main_and_invalid_entries_skipped(monkeypatch):
     assert [p["name"] for p in settings.platform_llm_providers] == ["ok"]
 
 
-def test_default_main_model_is_orcarouter_deepseek_with_key_from_env(monkeypatch):
+def test_default_main_model_is_routerai_qwen_with_key_from_env(monkeypatch):
     monkeypatch.setattr(settings, "platform_llm_providers_raw", "")
-    monkeypatch.delenv("ORCAROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("ROUTERAI_API_KEY", raising=False)
     monkeypatch.setattr("app.config._dotenv", lambda: {})
     assert settings.platform_llm_providers == [] and not settings.platform_llm_configured       # без ключа основная модель не работает
-    monkeypatch.setenv("ORCAROUTER_API_KEY", "orca-key")
+    monkeypatch.setenv("ROUTERAI_API_KEY", "routerai-key")
     main = settings.platform_llm_providers[0]
     assert (main["name"], main["base_url"], main["model"], main["api_key"]) == (
-        "orcarouter", "https://api.orcarouter.ai/v1", "deepseek/deepseek-v4-flash-free", "orca-key")
+        "routerai", "https://routerai.ru/api/v1", "qwen/qwen3.8-27b", "routerai-key")
 
 
 def test_api_key_env_is_read_from_environment_or_dotenv_and_broken_json_falls_back(monkeypatch):
@@ -88,13 +88,13 @@ def test_api_key_env_is_read_from_environment_or_dotenv_and_broken_json_falls_ba
     monkeypatch.setattr("app.config._dotenv", lambda: {"KEY_B": "from-dotenv"})
     assert [(p["name"], p["api_key"]) for p in settings.platform_llm_providers] == [("a", "from-env"), ("b", "from-dotenv")]
     monkeypatch.setattr(settings, "platform_llm_providers_raw", "{не json")
-    monkeypatch.setenv("ORCAROUTER_API_KEY", "orca-key")
-    assert [p["name"] for p in settings.platform_llm_providers] == ["orcarouter"]
+    monkeypatch.setenv("ROUTERAI_API_KEY", "routerai-key")
+    assert [p["name"] for p in settings.platform_llm_providers] == ["routerai"]
 
 
 def test_platform_unavailable_without_any_key(monkeypatch):
     monkeypatch.setattr(settings, "platform_llm_providers_raw", "")
-    monkeypatch.delenv("ORCAROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("ROUTERAI_API_KEY", raising=False)
     monkeypatch.setattr("app.config._dotenv", lambda: {})
     with pytest.raises(AIUnavailable):
         ask()
@@ -235,4 +235,4 @@ def test_models_endpoint_returns_default_and_list_without_keys(user):
     assert r.status_code == 200
     body = r.json()
     assert body["default"] == body["models"][0]["model"] and body["models"][0]["main"] is True
-    assert "key" not in json.dumps(body).lower().replace("api.orcarouter", "")
+    assert "key" not in json.dumps(body).lower().replace("routerai.ru", "")

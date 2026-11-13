@@ -65,9 +65,9 @@ FlowMind AI — no-code редактор для сборки AI-агентов �
 |---|---|---|
 | Регистрация и вход | да | нет — работает сразу |
 | Тарифы и оплата | да | нет — безлимитный «локальный» тариф |
-| База данных | PostgreSQL | SQLite |
+| База данных | PostgreSQL (рекомендуется) | SQLite (файл) |
 | Локальные модели (Ollama) | недоступны | да, по умолчанию |
-| LLM по умолчанию | AI сервиса или свои ключи | Ollama |
+| LLM по умолчанию | AI сервиса (ключ Hugging Face) или свои ключи | Ollama |
 | Telegram-триггер | webhook (нужен публичный HTTPS-адрес) | long polling (адрес не нужен) |
 | Защита HTTP-ноды от запросов во внутреннюю сеть | включена | выключена |
 | Админ-панель, лендинг | да | не показываются |
@@ -160,7 +160,7 @@ docker compose up --build
 
 ```env
 OLLAMA_MODEL=qwen2.5            # любая модель Ollama с поддержкой tool calling
-ORCAROUTER_API_KEY=...          # основная модель встроенного AI (OrcaRouter, DeepSeek V4 Flash)
+ROUTERAI_API_KEY=...          # основная модель встроенного AI (RouterAI, Qwen 3.8 27B)
 GOOGLE_CLIENT_ID=...             # для Google Таблиц/Календаря
 GOOGLE_CLIENT_SECRET=...
 ```
@@ -195,7 +195,7 @@ GOOGLE_CLIENT_SECRET=...
    Приложение: <http://localhost:5173> (запросы `/api/*` проксируются на backend).
 
 ### Что нужно знать о локальном режиме
-- В нодах LLM/Agent режим **Local** использует Ollama (`OLLAMA_URL`, `OLLAMA_MODEL`), режим **Cloud** — свои подключения либо модели платформы (`ORCAROUTER_API_KEY`, `PLATFORM_LLM_PROVIDERS`).
+- В нодах LLM/Agent режим **Local** использует Ollama (`OLLAMA_URL`, `OLLAMA_MODEL`), режим **Cloud** — свои подключения либо модели платформы (`ROUTERAI_API_KEY`, `PLATFORM_LLM_PROVIDERS`).
 - Шаблоны при создании автоматически переключаются на Ollama.
 - Telegram-триггер работает через long polling: публичный адрес не нужен. Сообщения, присланные боту, пока сервис был выключен, пропускаются.
 - Включить вход и в локальной версии можно переменными `AUTH_ENABLED=true` (например, для домашнего сервера в сети) — тогда работает обычная регистрация.
@@ -213,7 +213,7 @@ GOOGLE_CLIENT_SECRET=...
 2. Render → **New → Blueprint** → выберите репозиторий — подхватится `render.yaml` (веб-сервис в Docker + PostgreSQL).
 3. Render спросит значения секретных переменных:
    - `ADMIN_EMAIL`, `ADMIN_PASSWORD` — ваш администратор (домен email должен быть настоящим, например `example.com`; зарезервированные `.test`/`.local` не подойдут);
-   - `ORCAROUTER_API_KEY` — ключ основной модели AI сервиса (при необходимости `PLATFORM_LLM_PROVIDERS` — полный список моделей);
+   - `ROUTERAI_API_KEY` — ключ основной модели AI сервиса (при необходимости `PLATFORM_LLM_PROVIDERS` — полный список моделей);
    - `SECRET_KEY` и `ENCRYPTION_KEY` сгенерируются автоматически.
 4. Адрес сервиса (`https://….onrender.com`) подставляется автоматически: он нужен для вебхуков Telegram и возврата с оплаты.
 
@@ -237,7 +237,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
 - [ ] `DEMO_MODE=false`.
 - [ ] Настроен SMTP (`SMTP_*`) и при желании `REQUIRE_EMAIL_VERIFICATION=true`.
 - [ ] `PAYMENT_PROVIDER=yookassa` и заполнены ключи ЮKassa ([инструкция](#подключение-реальной-оплаты-юkassa)).
-- [ ] Задан `ORCAROUTER_API_KEY` (или `PLATFORM_LLM_PROVIDERS`) и проверена модель с tool calling; в админ-панели выставлен суточный потолок.
+- [ ] Задан `ROUTERAI_API_KEY` (или `PLATFORM_LLM_PROVIDERS`) и проверена модель с tool calling; в админ-панели выставлен суточный потолок.
 - [ ] Сервис запущен **одним инстансом** (см. [ограничения](#ограничения)).
 
 ---
@@ -274,7 +274,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
 | Telegram Bot | Bot Token | [@BotFather](https://t.me/BotFather) |
 | Google Таблицы / Календарь | Вход через Google (OAuth2) | требует настройки в Google Cloud Console |
 
-**AI сервиса.** Если в шаге не выбрано своё подключение (режим Cloud), используются модели платформы. Они заданы **одним списком** `PLATFORM_LLM_PROVIDERS` (JSON): первая модель основная, остальные запасные. Если список не задан, основной служит `deepseek/deepseek-v4-flash-free` на OrcaRouter (`https://api.orcarouter.ai/v1`) с ключом из `ORCAROUTER_API_KEY`. У каждой записи есть `name`, `base_url` (только https, OpenAI-совместимый API), `model` (с поддержкой tool calling), ключ в `api_key_env` (имя переменной) или `api_key`. Ключ платформы защищён: общий суточный потолок запросов, рубильник «AI выключен» в админ-панели, ограничение длины ответа. Бесплатные квоты ограничены — следите за условиями провайдеров.
+**AI сервиса.** Если в шаге не выбрано своё подключение (режим Cloud), используются модели платформы. Они заданы **одним списком** `PLATFORM_LLM_PROVIDERS` (JSON): первая модель основная, остальные запасные. Если список не задан, основной служит `qwen/qwen3.8-27b` на RouterAI (`https://routerai.ru/api/v1`) с ключом из `ROUTERAI_API_KEY`. У каждой записи есть `name`, `base_url` (только https, OpenAI-совместимый API), `model` (с поддержкой tool calling), ключ в `api_key_env` (имя переменной) или `api_key`. Ключ платформы защищён: общий суточный потолок запросов, рубильник «AI выключен» в админ-панели, ограничение длины ответа. Бесплатные квоты ограничены — следите за условиями провайдеров.
 
 **Google OAuth (Таблицы и Календарь)**
 1. [console.cloud.google.com](https://console.cloud.google.com) → создайте проект.
@@ -329,7 +329,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
 | `DEMO_MODE` | показывать ссылки из писем в ответе API и `/api/docs` — только для демо |
 | `PAYMENT_PROVIDER`, `YOOKASSA_*` | оплата |
 | `OLLAMA_URL`, `OLLAMA_MODEL` | локальные модели |
-| `ORCAROUTER_API_KEY`, `PLATFORM_LLM_PROVIDERS`, `AI_DAILY_CAP` | AI сервиса |
+| `ROUTERAI_API_KEY`, `PLATFORM_LLM_PROVIDERS`, `AI_DAILY_CAP` | AI сервиса |
 | `TELEGRAM_MODE` | `auto` / `webhook` / `polling` / `off` |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` | Google OAuth: Таблицы, Календарь, Gmail |
 | `YANDEX_CLIENT_ID`, `YANDEX_CLIENT_SECRET` | Яндекс Почта через OAuth (XOAUTH2) |

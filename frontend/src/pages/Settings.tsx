@@ -54,7 +54,7 @@ export default function Settings() {
                         ) : (
                             <>
                                 Эти значения подставляются в новые шаги. Адрес Ollama (<code>OLLAMA_URL</code>) и ключ AI платформы
-                                (<code>ORCAROUTER_API_KEY</code>, список моделей <code>PLATFORM_LLM_PROVIDERS</code>) задаются в <code>.env</code> на сервере.
+                                (<code>ROUTERAI_API_KEY</code>, список моделей <code>PLATFORM_LLM_PROVIDERS</code>) задаются в <code>.env</code> на сервере.
                             </>
                         )}
                     </div>
