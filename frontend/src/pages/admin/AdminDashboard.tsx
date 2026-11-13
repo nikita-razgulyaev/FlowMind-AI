@@ -65,6 +65,11 @@ export default function AdminDashboard() {
                     <div className={`h-full ${aiPercent > 85 ? "bg-red-500" : "bg-blue-500"}`} style={{ width: `${aiPercent}%` }} />
                 </div>
                 <p className="text-xs text-gray-500 mt-2">{t("admin.stats.aiCalls", { used: stats.ai.calls_today, cap: stats.ai.daily_cap })}</p>
+                {stats.ai.key_configured && (
+                    <p className="text-xs text-gray-500 mt-1">
+                        {stats.ai.fallback_models > 0 ? t("admin.stats.aiFallbacks", { count: stats.ai.fallback_models }) : t("admin.stats.aiNoFallbacks")}
+                    </p>
+                )}
             </Card>
         </div>
     );

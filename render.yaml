@@ -33,7 +33,7 @@ services:
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
-      - key: PLATFORM_LLM_API_KEY
+      - key: ORCAROUTER_API_KEY
         sync: false
-      - key: PLATFORM_LLM_MODEL
-        value: openai/gpt-oss-120b:groq
+      - key: PLATFORM_LLM_PROVIDERS
+        sync: false

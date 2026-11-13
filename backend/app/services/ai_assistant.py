@@ -23,13 +23,17 @@ schedule — запуск по интервалу (триггер). config: {"in
 print — вывод результата. config: {"value": "{id_ноды}"}
 telegram_send — отправка сообщения в Telegram. config: {"connection_id": <id>, "chat_id": "" (пусто = ответ в чат триггера), "message": "текст"}
 google_sheets_append — добавить строку в Google Таблицу. config: {"connection_id": <id>, "spreadsheet_id": "", "range": "A1", "values": "a, b, c"}
+email_trigger — запуск входящим письмом (триггер). config: {"connection_id": <id подключения email>, "interval_minutes": 5}; доступны {email_from}, {email_subject}, {email_body}.
+text_transform — обработка текста без нейросети. config: {"operation": "extract_email|extract_phone|extract_order|extract_date|extract_amount|extract_url|extract_regex|normalize|clean_email|first_line|truncate|lower|upper|trim", "value": "{input}", "pattern": "", "max_chars": 500}. Результат — строка (пустая, если не найдено).
+email_send — отправить письмо. config: {"connection_id": <id подключения email>, "to": "{email_from}", "subject": "", "body": "", "as_reply": false}
 google_calendar_create_event — создать событие. config: {"connection_id": <id>, "calendar_id": "primary", "summary": "", "description": "", "start_datetime": "", "end_datetime": ""}"""
 
 ALLOWED_TYPES = {
     "manual", "telegram_trigger", "llm", "agent", "http", "condition", "print", "telegram_send",
     "google_sheets_append", "google_calendar_create_event", "switch", "set", "webhook", "schedule", "text_input",
+    "email_trigger", "text_transform", "email_send",
 }
-TRIGGERS = {"manual", "telegram_trigger", "webhook", "schedule"}
+TRIGGERS = {"manual", "telegram_trigger", "webhook", "schedule", "email_trigger"}
 MAX_HISTORY = 10
 
 

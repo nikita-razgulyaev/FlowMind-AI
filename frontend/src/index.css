@@ -1,1 +1,33 @@
 @import "tailwindcss";
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translate(-50%, 2px); }
+    to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+@keyframes slideIn {
+    from { opacity: 0; transform: translateX(16px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes tourPulse {
+    0%, 100% { box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.55); }
+    50% { box-shadow: 0 0 0 7px rgba(37, 99, 235, 0.15); }
+}
+
+
+
+@keyframes arrowBounce {
+    0%, 100% { transform: translateX(0); }
+    50% { transform: translateX(-6px); }
+}
+
+@keyframes seqIn {
+    from { opacity: 0; transform: translateY(4px) scale(0.97); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes lineGrow {
+    from { transform: scaleX(0); opacity: 0; }
+    to { transform: scaleX(1); opacity: 1; }
+}

@@ -7,7 +7,8 @@ services:
       - DATABASE_URL=sqlite+aiosqlite:///./flowmind.db
       - LLM_MODE=cloud
       - CLOUD_PROVIDER=huggingface
-      - HF_TOKEN=${HF_TOKEN}
+      - ORCAROUTER_API_KEY=${ORCAROUTER_API_KEY}
+      - PLATFORM_LLM_PROVIDERS=${PLATFORM_LLM_PROVIDERS:-}
       - HF_MODEL=${HF_MODEL:-Qwen/Qwen2.5-1.5B-Instruct}
     dns:
       - 8.8.8.8

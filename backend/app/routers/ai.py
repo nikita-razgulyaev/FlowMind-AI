@@ -31,6 +31,14 @@ class ChatIn(BaseModel):
     model: Optional[str] = Field(default=None, max_length=120)
 
 
+@router.get("/models")
+async def platform_models(user: User = Depends(get_current_user)):
+    """Модели встроенного AI из секретов сервера: первая основная (выбрана по умолчанию), остальные запасные. Ключи не отдаются."""
+    from ..services.llm import provider_status
+    models = provider_status()
+    return {"default": models[0]["model"] if models else "", "models": models}
+
+
 @router.post("/chat")
 async def chat(data: ChatIn, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     ai_chat_limiter.check(str(user.id), "Слишком часто, подождите немного")

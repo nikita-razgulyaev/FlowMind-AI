@@ -45,7 +45,7 @@ export default function Settings() {
                     </h1>
                     <p className="text-sm text-gray-500 mt-1 mb-6">
                         Дефолты, которые подставляются при добавлении новых
-                        LLM/Agent-нод на canvas.
+                        шагов «Нейросеть» и «ИИ-агент» на рабочей области.
                     </p>
 
                     <div className="bg-blue-50 border border-blue-200 text-blue-800 text-xs rounded-lg px-4 py-3 mb-6">
@@ -53,13 +53,14 @@ export default function Settings() {
                             <>Настройки сохраняются в вашем аккаунте и действуют на всех устройствах. В облачной версии доступны облачные модели.</>
                         ) : (
                             <>
-                                Это дефолты для новых нод. Адрес Ollama (<code>OLLAMA_URL</code>) и ключ AI платформы
-                                (<code>PLATFORM_LLM_API_KEY</code>) задаются в <code>.env</code> на сервере.
+                                Эти значения подставляются в новые шаги. Адрес Ollama (<code>OLLAMA_URL</code>) и ключ AI платформы
+                                (<code>ORCAROUTER_API_KEY</code>, список моделей <code>PLATFORM_LLM_PROVIDERS</code>) задаются в <code>.env</code> на сервере.
                             </>
                         )}
                     </div>
 
                     <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-5">
+                        {!isCloud && (
                         <div>
                             <label className={label}>Режим по умолчанию</label>
                             <div className="flex gap-2">
@@ -80,7 +81,9 @@ export default function Settings() {
                                 ))}
                             </div>
                         </div>
+                        )}
 
+                        {!isCloud && (
                         <div>
                             <label className={label}>
                                 Локальная модель по умолчанию
@@ -94,7 +97,9 @@ export default function Settings() {
                                 className={input}
                             />
                         </div>
+                        )}
 
+                        {!isCloud && (
                         <div>
                             <label className={label}>
                                 Облачная модель по умолчанию
@@ -108,6 +113,7 @@ export default function Settings() {
                                 className={input}
                             />
                         </div>
+                        )}
 
                         <div>
                             <label className={label}>

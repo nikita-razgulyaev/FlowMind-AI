@@ -74,7 +74,7 @@ export default function ChatLogPanel({ executions, focusId, onClear, onClose }: 
 
             {executions.length === 0 && (
                 <p className="px-4 py-3 text-xs text-gray-400">
-                    Пока нет данных — запусти workflow (Run).
+                    Пока нет данных. Нажмите «Запустить», чтобы проверить сценарий.
                 </p>
             )}
 

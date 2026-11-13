@@ -81,7 +81,8 @@ def test_run_button_uses_trigger_test_input_but_real_triggers_do_not():
 
 
 def test_templates_are_valid_graphs():
-    assert set(TEMPLATES) == {"telegram_support", "lead_to_sheets", "meeting_summary", "lead_qualification", "request_router"}
+    assert set(TEMPLATES) == {"telegram_support", "lead_to_sheets", "meeting_summary", "lead_qualification", "request_router",
+                              "faq_bot", "order_request", "email_support", "email_leads", "email_router"}
     for key, tpl in TEMPLATES.items():
         ids = {n["id"] for n in tpl["nodes"]}
         assert len(ids) == len(tpl["nodes"]), key
@@ -114,3 +115,76 @@ def test_progress_reports_running_done_skipped_failed():
     asyncio.run(engine.execute({"input": "x"}))
     assert events == [("t", "running"), ("t", "done"), ("c", "running"), ("c", "done"),
                       ("yes", "skipped"), ("no", "running"), ("no", "failed")]
+
+
+def test_request_router_normalizes_model_answer_and_uses_other_branch():
+    tpl = TEMPLATES["request_router"]
+    wf = {"nodes": tpl["nodes"], "edges": tpl["edges"]}
+    trig = {"input": "привет", "telegram": {"chat_id": 1, "text": "привет"}}
+    assert run(wf, {"Определи тип": "Support.", "Ты — поддержка": "Помогу"}, trigger=trig).context["reply_support"] == "Помогу"
+    ctx = run(wf, {"Определи тип": "other", "Вежливо ответь": "Чем помочь?"}, trigger=trig).context
+    assert ctx["reply_other"] == "Чем помочь?" and ctx["reply_support"] == ""
+    ctx = run(wf, {"Определи тип": "что-то странное", "Вежливо ответь": "Чем помочь?"}, trigger=trig).context
+    assert ctx["reply_other"] == "Чем помочь?"      # страховка default
+
+
+def test_order_request_template_extracts_order_and_phone():
+    tpl = TEMPLATES["order_request"]
+    wf = {"nodes": tpl["nodes"], "edges": tpl["edges"]}
+    ctx = run(wf, trigger={"input": "Где мой заказ? Номер 1234, звоните 8 900 111-22-33",
+                           "telegram": {"chat_id": 1, "text": "x", "username": "anna"}}).context
+    assert ctx["order_number"] == "1234" and ctx["phone"] == "+79001112233"
+
+
+def test_text_transform_node_operations():
+    wf = {"nodes": [
+        {"id": "t", "type": "manual", "config": {}},
+        {"id": "o", "type": "text_transform", "config": {"operation": "extract_order", "value": "{input}"}},
+        {"id": "e", "type": "text_transform", "config": {"operation": "extract_email", "value": "{input}"}},
+        {"id": "r", "type": "text_transform", "config": {"operation": "extract_regex", "value": "{input}", "pattern": r"код (\w+)"}},
+        {"id": "n", "type": "text_transform", "config": {"operation": "normalize", "value": "Support."}},
+        {"id": "bad", "type": "text_transform", "config": {"operation": "nope", "value": "x"}},
+    ], "edges": [edge("t", "o"), edge("o", "e"), edge("e", "r"), edge("r", "n"), edge("n", "bad")]}
+    ctx = run(wf, trigger={"input": "Статус заказа №1234 от 05.11.26, пишите a.b@mail.ru, код XY7"}).context
+    assert (ctx["o"], ctx["e"], ctx["r"], ctx["n"]) == ("1234", "a.b@mail.ru", "XY7", "support")
+    assert ctx["bad"].startswith("Text Error")
+
+
+def test_email_send_node_checks_connection_and_sends(monkeypatch):
+    from app.services import email_service
+    sent = []
+
+    async def fake_send(cfg, to, subject, body, reply_to_id=""):
+        sent.append((cfg["email"], to, subject, body, reply_to_id))
+
+    monkeypatch.setattr(email_service, "send_message", fake_send)
+    wf = {"nodes": [
+        {"id": "t", "type": "email_trigger", "config": {"test_input": "Нужна помощь", "test_from": "client@example.com", "test_subject": "Вопрос"}},
+        {"id": "m", "type": "email_send", "config": {"connection_id": 7, "to": "{email_from}", "subject": "Re: {email_subject}", "body": "Ответ: {input}"}},
+    ], "edges": [edge("t", "m")]}
+    engine = WorkflowEngine(wf, 1, connections={7: {"provider": "email", "config": {"email": "shop@mail.ru", "password": "pw"}}})
+    engine.llm = FakeLLM({})
+    asyncio.run(engine.execute({"input": ""}))
+    assert engine.context["m"] == {"status": "sent", "to": "client@example.com", "subject": "Re: Вопрос"}
+    assert sent == [("shop@mail.ru", "client@example.com", "Re: Вопрос", "Ответ: Нужна помощь", "")]
+    assert run({"nodes": [{"id": "t", "type": "manual", "config": {}}, {"id": "m", "type": "email_send", "config": {"to": "a@b.ru"}}],
+                "edges": [edge("t", "m")]}).context["m"].startswith("Email Error")
+
+
+def test_email_trigger_context_from_real_letter():
+    wf = {"nodes": [{"id": "t", "type": "email_trigger", "config": {}},
+                    {"id": "p", "type": "print", "config": {"value": "{email_from}|{email_subject}|{email_body}"}}], "edges": [edge("t", "p")]}
+    letter = {"from": "x@y.ru", "from_name": "Иван", "subject": "Тема", "body": "Текст", "message_id": "<1@y>"}
+    ctx = run(wf, trigger={"input": "Тема\n\nТекст", "email": letter}).context
+    assert ctx["p"] == "x@y.ru|Тема|Текст"
+
+
+def test_tool_schema_examples_move_into_description():
+    from app.worker import prepare_tool_schema
+    schema = {"type": "object", "properties": {"order_id": {"type": "string", "description": "ID заказа", "examples": ["1234", "№1234 от 05.11.26"]}},
+              "required": ["order_id", "ghost"]}
+    out = prepare_tool_schema(schema)
+    prop = out["properties"]["order_id"]
+    assert "examples" not in prop and "«1234»" in prop["description"] and "№1234 от 05.11.26" in prop["description"]
+    assert out["required"] == ["order_id"]
+    assert prepare_tool_schema("мусор") == {"type": "object", "properties": {}, "required": []}

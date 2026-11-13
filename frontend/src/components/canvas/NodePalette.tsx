@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import { NODE_META } from "./CanvasNode";
+import { NODE_INFO, PALETTE_TABS } from "../../utils/glossary";
 
 interface PaletteGroup {
     label: string;
@@ -11,54 +12,76 @@ interface PaletteGroup {
 
 interface PaletteTab {
     id: string;
-    label: string;
     groups: PaletteGroup[];
 }
 
 const TABS: PaletteTab[] = [
     {
         id: "triggers",
-        label: "Триггеры",
-        groups: [{ label: "Запуск", items: ["manual", "telegram_trigger", "webhook", "schedule"] }],
+        groups: [{ label: "Запуск", items: ["manual", "telegram_trigger", "email_trigger", "webhook", "schedule"] }],
     },
     {
         id: "ai",
-        label: "AI",
-        groups: [{ label: "Модели", items: ["llm", "agent"] }],
+        groups: [{ label: "Нейросеть", items: ["llm", "agent"] }],
     },
     {
         id: "logic",
-        label: "Логика и данные",
         groups: [
             { label: "Ветвление", items: ["condition", "switch"] },
-            { label: "Данные", items: ["text_input", "set", "print"], dropdown: true },
+            { label: "Текст и данные", items: ["text_transform", "text_input", "set"], dropdown: true },
+            { label: "Результат", items: ["print"] },
         ],
     },
     {
         id: "apps",
-        label: "Интеграции",
         groups: [
             { label: "Сеть", items: ["http"] },
             { label: "Telegram", items: ["telegram_send"] },
-            { label: "Google", items: ["google_sheets_append", "google_calendar_create_event"], dropdown: true },
+            { label: "Почта", items: ["email_send"] },
+            { label: "Таблицы", items: ["google_sheets_append"] },
+            { label: "Календарь", items: ["google_calendar_create_event"] },
         ],
     },
 ];
 
+/** Всплывающая подсказка с задержкой: название, что делает и пример. */
+function HintBubble({ title, hint, example, children }: { title: string; hint: string; example?: string; children: ReactNode }) {
+    return (
+        <div className="group relative">
+            {children}
+            <div className="pointer-events-none absolute left-1/2 top-full z-40 mt-1 hidden w-64 max-w-[min(16rem,calc(100vw-2rem))] -translate-x-1/2 rounded-lg border border-gray-200 bg-white p-3 text-left shadow-xl group-hover:block group-hover:animate-[fadeIn_0.15s_ease-out_0.4s_both]">
+                <p className="text-xs font-semibold text-gray-800">{title}</p>
+                <p className="mt-1 text-xs leading-snug text-gray-600">{hint}</p>
+                {example && (
+                    <p className="mt-1.5 text-[11px] leading-snug text-gray-400">
+                        <span className="font-medium text-gray-500">Пример: </span>
+                        {example}
+                    </p>
+                )}
+                <p className="mt-1.5 text-[11px] text-blue-600">Нажмите, чтобы добавить на рабочую область</p>
+            </div>
+        </div>
+    );
+}
+
 function ToolButton({ type, onAdd }: { type: string; onAdd: (type: string) => void }) {
     const meta = NODE_META[type];
+    const info = NODE_INFO[type];
     const Icon = meta.icon;
     return (
-        <button
-            onClick={() => onAdd(type)}
-            title={`Добавить: ${meta.label}`}
-            className="flex flex-col items-center gap-1 w-[92px] py-1 rounded-md hover:bg-gray-200/70 active:bg-gray-300/70"
-        >
-            <span className={`flex items-center justify-center w-8 h-8 rounded-lg ${meta.badge}`}>
-                <Icon className="w-5 h-5" />
-            </span>
-            <span className="whitespace-nowrap text-[11px] leading-tight text-gray-700">{meta.label}</span>
-        </button>
+        <HintBubble title={info.label} hint={info.hint} example={info.example}>
+            <button
+                onClick={() => onAdd(type)}
+                aria-label={`Добавить шаг: ${info.label}`}
+                data-tour={`add-${type}`}
+                className="flex flex-col items-center gap-1 w-[92px] py-1 rounded-md hover:bg-gray-200/70 active:bg-gray-300/70"
+            >
+                <span className={`flex items-center justify-center w-8 h-8 rounded-lg ${meta.badge}`}>
+                    <Icon className="w-5 h-5" />
+                </span>
+                <span className="text-center text-[11px] leading-tight text-gray-700">{meta.label}</span>
+            </button>
+        </HintBubble>
     );
 }
 
@@ -81,6 +104,7 @@ function DropdownGroup({ group, onAdd }: { group: PaletteGroup; onAdd: (type: st
         <div ref={ref} className="relative">
             <button
                 onClick={() => setOpen((v) => !v)}
+                title="Нажмите, чтобы выбрать шаг из списка"
                 className={`flex flex-col items-center gap-1 w-[92px] py-1 rounded-md hover:bg-gray-200/70 ${open ? "bg-gray-200/70" : ""}`}
             >
                 <span className={`flex items-center justify-center w-8 h-8 rounded-lg ${first.badge}`}>
@@ -92,9 +116,10 @@ function DropdownGroup({ group, onAdd }: { group: PaletteGroup; onAdd: (type: st
                 </span>
             </button>
             {open && (
-                <div className="absolute left-0 top-full mt-1 z-30 min-w-[210px] rounded-lg border border-gray-200 bg-white py-1 shadow-xl">
+                <div className="absolute left-0 top-full mt-1 z-30 w-[300px] rounded-lg border border-gray-200 bg-white py-1 shadow-xl">
                     {group.items.map((type) => {
                         const meta = NODE_META[type];
+                        const info = NODE_INFO[type];
                         const ItemIcon = meta.icon;
                         return (
                             <button
@@ -103,12 +128,15 @@ function DropdownGroup({ group, onAdd }: { group: PaletteGroup; onAdd: (type: st
                                     onAdd(type);
                                     setOpen(false);
                                 }}
-                                className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
+                                className="flex w-full items-start gap-2.5 px-3 py-2 text-left hover:bg-gray-100"
                             >
-                                <span className={`flex items-center justify-center w-6 h-6 rounded ${meta.badge}`}>
+                                <span className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded ${meta.badge}`}>
                                     <ItemIcon className="w-4 h-4" />
                                 </span>
-                                {meta.label}
+                                <span>
+                                    <span className="block text-sm text-gray-800">{meta.label}</span>
+                                    <span className="block text-[11px] leading-snug text-gray-500">{info.hint}</span>
+                                </span>
                             </button>
                         );
                     })}
@@ -118,25 +146,26 @@ function DropdownGroup({ group, onAdd }: { group: PaletteGroup; onAdd: (type: st
     );
 }
 
-/** Панель добавления нод в духе ленты Fusion 360: вкладки сверху, группы с подписями и выпадающими списками. */
+/** Панель добавления шагов: вкладки сверху, группы с подписями и выпадающими списками. У каждого элемента — понятная подсказка. */
 export default function NodePalette({ onAdd }: { onAdd: (type: string) => void }) {
     const [activeId, setActiveId] = useState(TABS[0].id);
     const tab = TABS.find((t) => t.id === activeId) ?? TABS[0];
 
     return (
-        <div className="border-b border-gray-200 bg-white select-none">
+        <div className="border-b border-gray-200 bg-white select-none" data-tour="palette">
             <div className="flex items-end gap-1 px-4 pt-1 bg-gray-100">
                 {TABS.map((t) => (
                     <button
                         key={t.id}
                         onClick={() => setActiveId(t.id)}
+                        title={PALETTE_TABS[t.id].hint}
                         className={`px-4 py-1 text-xs font-semibold uppercase tracking-wide rounded-t-md border border-b-0 ${
                             t.id === activeId
                                 ? "bg-gray-50 text-blue-600 border-gray-200 -mb-px"
                                 : "border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-200/60"
                         }`}
                     >
-                        {t.label}
+                        {PALETTE_TABS[t.id].label}
                     </button>
                 ))}
             </div>
@@ -150,11 +179,6 @@ export default function NodePalette({ onAdd }: { onAdd: (type: string) => void }
                                 group.items.map((type) => <ToolButton key={type} type={type} onAdd={onAdd} />)
                             )}
                         </div>
-                        <span
-                            className={`text-center text-[10px] leading-3 uppercase tracking-wider text-gray-400 ${group.dropdown ? "invisible" : ""}`}
-                        >
-                            {group.label}
-                        </span>
                     </div>
                 ))}
             </div>

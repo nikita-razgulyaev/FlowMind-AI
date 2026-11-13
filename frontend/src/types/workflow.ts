@@ -4,6 +4,9 @@ export interface WorkflowNode {
         | "manual"
         | "telegram_trigger"
         | "schedule"
+        | "email_trigger"
+        | "email_send"
+        | "text_transform"
         | "webhook"
         | "switch"
         | "set"
@@ -46,7 +49,7 @@ export interface Execution {
     id: number;
     workflow_id: number;
     status: "pending" | "running" | "success" | "failed";
-    source?: "manual" | "telegram" | "webhook" | "schedule";
+    source?: "manual" | "telegram" | "webhook" | "schedule" | "email";
     is_ai?: boolean;
     trigger_data: Record<string, any> | null;
     result: Record<string, any> | null;
@@ -76,5 +79,8 @@ export interface Connection {
     provider: string;
     name: string;
     config: Record<string, any>;
+    oauth?: boolean;
+    needs_reauth?: boolean;
+    account?: string;
     created_at: string;
 }

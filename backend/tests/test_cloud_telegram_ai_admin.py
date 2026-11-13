@@ -56,7 +56,7 @@ def hook(client, conn_id, upd, secret=None):
 def test_telegram_webhook_registration_and_trigger(client, fake_net):
     s = register(client)
     cid = bot_connection(s)
-    assert fake_net.telegram_calls == []                           # вебхук без активных воркфлоу не нужен
+    assert [c for c in fake_net.telegram_calls if c[0] != "getMe"] == []                           # вебхук без активных воркфлоу не нужен
     wf = s.post("/workflows/", json=telegram_workflow(cid)).json()
     assert wf["has_telegram_trigger"] is True and wf["is_ai"] is False
 
@@ -276,7 +276,7 @@ def test_telegram_ignores_messages_sent_before_start(client, fake_net):
     s = register(client)
     cid = bot_connection(s)
     wf = s.post("/workflows/", json={**telegram_workflow(cid), "is_active": False}).json()
-    assert fake_net.telegram_calls == []                           # остановленный воркфлоу вебхук не включает
+    assert [c for c in fake_net.telegram_calls if c[0] != "getMe"] == []                           # остановленный воркфлоу вебхук не включает
 
     started = s.post(f"/workflows/{wf['id']}/activate").json()
     assert started["is_active"] is True

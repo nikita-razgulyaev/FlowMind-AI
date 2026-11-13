@@ -109,7 +109,7 @@ def test_ai_workflow_uses_platform_key_and_guard(client, admin, fake_net):
     fake_net.llm_queue.append("Привет из платформы")
     res = s.post(f"/workflows/{wid}/execute", json={"input": "мир"}).json()
     assert res["status"] == "success" and res["result"]["l"] == "Привет из платформы"
-    req = [r for r in fake_net.requests if r.url.host == "router.huggingface.co"][0]
+    req = [r for r in fake_net.requests if r.url.host == "api.orcarouter.ai"][0]
     assert req.headers["authorization"] == "Bearer test-platform-key" and req.url.path.endswith("/chat/completions")
     assert s.get("/me").json()["usage"]["ai_run"] == 1
 

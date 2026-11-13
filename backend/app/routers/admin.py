@@ -7,6 +7,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
+from ..services.llm import provider_status as llm_provider_status
 from ..database import get_db
 from ..deps import require_admin
 from ..models import AuditLog, Execution, Payment, Plan, Subscription, User, Workflow, utcnow
@@ -64,7 +65,9 @@ async def stats(admin: User = Depends(require_admin), db: AsyncSession = Depends
             "enabled": bool(await get_app_setting(db, "ai_enabled", True)),
             "daily_cap": int(await get_app_setting(db, "ai_daily_cap", settings.ai_daily_cap)),
             "calls_today": await get_global(db, "platform_ai_calls"),
-            "key_configured": bool(settings.platform_llm_api_key),
+            "key_configured": settings.platform_llm_configured,
+            "fallback_models": max(len(settings.platform_llm_providers) - 1, 0),
+            "models": llm_provider_status(),
         },
     }
 

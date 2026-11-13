@@ -12,7 +12,7 @@ os.environ["DEPLOYMENT_MODE"] = TEST_MODE
 os.environ["SECRET_KEY"] = "test-secret-key-for-pytest-only-0123456789"
 os.environ["ADMIN_EMAIL"] = "boss@example.com"
 os.environ["DEMO_MODE"] = "true"
-os.environ["PLATFORM_LLM_API_KEY"] = "test-platform-key"
+os.environ["ORCAROUTER_API_KEY"] = "test-platform-key"
 os.environ["PAYMENT_PROVIDER"] = "mock"
 os.environ["PUBLIC_BASE_URL"] = "https://flowmind.test" if TEST_MODE == "cloud" else ""
 os.environ.pop("AUTH_ENABLED", None)
@@ -60,6 +60,8 @@ class FakeNet:
         if host == "api.telegram.org":
             method = path.rsplit("/", 1)[-1]
             self.telegram_calls.append((method, body))
+            if method == "getMe":
+                return httpx.Response(200, json={"ok": True, "result": {"id": 1, "is_bot": True, "username": "test_bot"}})
             if method == "getUpdates" and body.get("offset") != -1 and self.tg_updates:
                 return httpx.Response(200, json={"ok": True, "result": [self.tg_updates.pop(0)]})
             return httpx.Response(200, json={"ok": True, "result": []})

@@ -21,8 +21,18 @@ def _sheets(node_id: str, values: str, x: int, y: int) -> dict:
             "config": {"spreadsheet_id": "", "range": "A1", "values": values}}
 
 
+def _transform(node_id: str, operation: str, x: int, y: int, value: str = "{input}") -> dict:
+    return {"id": node_id, "type": "text_transform", "position": {"x": x, "y": y},
+            "config": {"operation": operation, "value": value, "pattern": "", "max_chars": 500}}
+
+
+
+
+
+
+
 def _edge(source: str, target: str, condition: str | None = None) -> dict:
-    edge = {"id": f"{source}__{target}", "from_node": source, "to_node": target, "type": "next"}
+    edge = {"id": f"{source}__{target}" + (f"__{condition}" if condition else ""), "from_node": source, "to_node": target, "type": "next"}
     if condition:
         edge["condition"] = condition
     return edge
@@ -95,11 +105,11 @@ TEMPLATES = {
 
     "request_router": {
         "name": "Классификатор обращений",
-        "description": "Определяет тип обращения (поддержка / продажа / жалоба / другое), отвечает по типу и ведёт лог в Sheets",
+        "description": "Определяет тип обращения (поддержка / продажа / жалоба / другое), отвечает по типу и ведёт журнал обращений в Google Таблице",
         "nodes": [
             _telegram_trigger(80, 280, "Заказ №4512 пришёл с браком, верните деньги!"),
-            _llm("classify", "Определи тип обращения. Ответь ОДНИМ словом из списка: support, sales, complaint, other.\n\nОбращение:\n{input}", 400, 280, 0.0),
-            {"id": "route", "type": "switch", "position": {"x": 720, "y": 280}, "config": {"value": "{classify}", "cases": "support, sales, complaint"}},
+            _llm("classify", "Определи тип обращения. Ответь ОДНИМ словом из списка: support, sales, complaint, other. Слово other — для всего, что не подходит под остальные типы.\n\nОбращение:\n{input}", 400, 280, 0.0),
+            {"id": "route", "type": "switch", "position": {"x": 720, "y": 280}, "config": {"value": "{classify}", "cases": "support, sales, complaint, other"}},
             _llm("reply_support", "Ты — поддержка. Дай полезный краткий ответ на вопрос клиента.\n\n{input}", 1040, 40),
             _llm("reply_sales", "Ты — менеджер по продажам. Ответь дружелюбно, расскажи, чем можешь помочь, и предложи следующий шаг.\n\n{input}", 1040, 220),
             _llm("reply_complaint", "Ты — менеджер по работе с жалобами. Извинись, покажи, что понял проблему, пообещай разобраться и вернуться в течение суток.\n\n{input}", 1040, 400),
@@ -110,10 +120,103 @@ TEMPLATES = {
         "edges": [
             _edge("trigger", "classify"), _edge("classify", "route"),
             _edge("route", "reply_support", "support"), _edge("route", "reply_sales", "sales"),
-            _edge("route", "reply_complaint", "complaint"), _edge("route", "reply_other", "default"),
+            _edge("route", "reply_complaint", "complaint"), _edge("route", "reply_other", "other"), _edge("route", "reply_other", "default"),   # default — страховка, если модель ответила не по списку
             _edge("reply_support", "send_reply"), _edge("reply_sales", "send_reply"),
             _edge("reply_complaint", "send_reply"), _edge("reply_other", "send_reply"),
             _edge("send_reply", "log_request"),
+        ],
+        "is_active": False,
+    },
+
+    "faq_bot": {
+        "name": "Ответы на частые вопросы",
+        "description": "Бот в Telegram отвечает клиентам строго по вашей базе знаний (график работы, цены, доставка). Замените текст в шаге «База знаний» на свой",
+        "nodes": [
+            _telegram_trigger(80, 140, "Во сколько вы работаете в субботу?"),
+            {"id": "knowledge", "type": "text_input", "position": {"x": 400, "y": 140}, "config": {
+                "file_name": "",
+                "text": "График работы: пн–пт с 9:00 до 19:00, сб с 10:00 до 16:00, воскресенье — выходной.\n"
+                        "Доставка по городу — 300 ₽, бесплатно от 5000 ₽. Оплата картой или наличными.\n"
+                        "Возврат возможен в течение 14 дней при сохранении товарного вида."}},
+            _llm("answer", "Вы — помощник компании. Отвечайте вежливо и кратко, ТОЛЬКО на основе базы знаний. "
+                           "Если ответа в базе нет, скажите, что передадите вопрос менеджеру.\n\nБаза знаний:\n{knowledge}\n\nВопрос клиента:\n{input}", 720, 140, 0.2),
+            _send("send_reply", "{answer}", 1040, 140),
+        ],
+        "edges": [_edge("trigger", "knowledge"), _edge("knowledge", "answer"), _edge("answer", "send_reply")],
+        "is_active": False,
+    },
+
+    "order_request": {
+        "name": "Приём обращений по заказу",
+        "description": "Находит в сообщении номер заказа и телефон без нейросети, записывает обращение в Google Таблицу и подтверждает клиенту",
+        "nodes": [
+            _telegram_trigger(80, 140, "Где мой заказ? Номер 1234, звоните на 8 900 111-22-33"),
+            _transform("order_number", "extract_order", 400, 140),
+            _transform("phone", "extract_phone", 720, 140),
+            _sheets("save_request", "{order_number}, {phone}, {telegram_username}, {input}", 1040, 140),
+            _send("send_reply", "Спасибо! Обращение по заказу {order_number} принято, менеджер свяжется с Вами.", 1360, 140),
+        ],
+        "edges": [_edge("trigger", "order_number"), _edge("order_number", "phone"), _edge("phone", "save_request"), _edge("save_request", "send_reply")],
+        "is_active": False,
+    },
+
+    "email_support": {
+        "name": "Ответы на входящие письма",
+        "description": "Читает новые письма в подключённой почте, готовит вежливый ответ и отправляет его отправителю. Нужна подключённая почта",
+        "nodes": [
+            {"id": "trigger", "type": "email_trigger", "position": {"x": 80, "y": 140}, "config": {
+                "connection_id": None, "interval_minutes": 5,
+                "test_input": "Добрый день! Подскажите, можно ли изменить адрес доставки заказа 5521?", "test_from": "client@example.com", "test_subject": "Вопрос по заказу"}},
+            _llm("reply", "Вы — служба поддержки компании. Напишите деловой, вежливый и краткий ответ на письмо клиента на языке письма. Без темы и подписи.\n\nТема: {email_subject}\n\nПисьмо:\n{input}", 400, 140, 0.3),
+            {"id": "send_mail", "type": "email_send", "position": {"x": 720, "y": 140}, "config": {
+                "connection_id": None, "to": "{email_from}", "subject": "Re: {email_subject}", "body": "{reply}\n\nС уважением, служба поддержки", "as_reply": True}},
+        ],
+        "edges": [_edge("trigger", "reply"), _edge("reply", "send_mail")],
+        "is_active": False,
+    },
+
+    # ───────── почта ─────────
+
+    "email_leads": {
+        "name": "Заявки с почты: в таблицу и автоответ",
+        "description": "Новое письмо → находит телефон и номер заказа без нейросети → строка в Google Таблице → автоответ клиенту. Нужны подключения: почта и Google Таблицы",
+        "nodes": [
+            {"id": "trigger", "type": "email_trigger", "position": {"x": 80, "y": 140}, "config": {
+                "connection_id": None, "interval_minutes": 5, "test_from": "client@example.com", "test_subject": "Вопрос по заказу",
+                "test_input": "Добрый день! Где мой заказ 5521? Мой телефон 8 900 111-22-33."}},
+            _transform("phone", "extract_phone", 400, 140),
+            _transform("order_number", "extract_order", 720, 140),
+            _sheets("save_request", "{email_from}, {email_subject}, {phone}, {order_number}", 1040, 140),
+            {"id": "autoreply", "type": "email_send", "position": {"x": 1360, "y": 140}, "config": {
+                "connection_id": None, "to": "{email_from}", "subject": "Re: {email_subject}", "as_reply": True,
+                "body": "Здравствуйте! Мы получили Ваше обращение и ответим в ближайшее время.\n\nС уважением, команда поддержки"}},
+        ],
+        "edges": [_edge("trigger", "phone"), _edge("phone", "order_number"), _edge("order_number", "save_request"), _edge("save_request", "autoreply")],
+        "is_active": False,
+    },
+
+    "email_router": {
+        "name": "Сортировка писем по темам",
+        "description": "Определяет тему письма (поддержка, продажи, жалоба, другое), готовит ответ нужного тона и отправляет его. Нужна подключённая почта",
+        "nodes": [
+            {"id": "trigger", "type": "email_trigger", "position": {"x": 80, "y": 280}, "config": {
+                "connection_id": None, "interval_minutes": 5, "test_from": "client@example.com", "test_subject": "Заказ с браком",
+                "test_input": "Заказ №4512 пришёл с браком. Верните деньги."}},
+            _llm("classify", "Определите тип письма. Ответьте ОДНИМ словом из списка: support, sales, complaint, other. Слово other — для всего остального.\n\nПисьмо:\n{input}", 400, 280, 0.0),
+            {"id": "route", "type": "switch", "position": {"x": 720, "y": 280}, "config": {"value": "{classify}", "cases": "support, sales, complaint, other"}},
+            _llm("reply_support", "Вы — служба поддержки. Напишите деловой, вежливый и краткий ответ с решением вопроса. Без темы и подписи.\n\nПисьмо:\n{input}", 1040, 100),
+            _llm("reply_sales", "Вы — менеджер по продажам. Поблагодарите за интерес, ответьте по существу и предложите следующий шаг. Без темы и подписи.\n\nПисьмо:\n{input}", 1040, 240),
+            _llm("reply_complaint", "Вы — менеджер по работе с жалобами. Извинитесь, покажите, что понимаете проблему, и предложите решение. Без темы и подписи.\n\nПисьмо:\n{input}", 1040, 380),
+            _llm("reply_other", "Вежливо ответьте на письмо и уточните, чем можете помочь. Без темы и подписи.\n\nПисьмо:\n{input}", 1040, 520),
+            {"id": "send_mail", "type": "email_send", "position": {"x": 1360, "y": 280}, "config": {
+                "connection_id": None, "to": "{email_from}", "subject": "Re: {email_subject}", "as_reply": True,
+                "body": "{reply_support}{reply_sales}{reply_complaint}{reply_other}\n\nС уважением, команда компании"}},
+        ],
+        "edges": [
+            _edge("trigger", "classify"), _edge("classify", "route"),
+            _edge("route", "reply_support", "support"), _edge("route", "reply_sales", "sales"), _edge("route", "reply_complaint", "complaint"),
+            _edge("route", "reply_other", "other"), _edge("route", "reply_other", "default"),
+            _edge("reply_support", "send_mail"), _edge("reply_sales", "send_mail"), _edge("reply_complaint", "send_mail"), _edge("reply_other", "send_mail"),
         ],
         "is_active": False,
     },

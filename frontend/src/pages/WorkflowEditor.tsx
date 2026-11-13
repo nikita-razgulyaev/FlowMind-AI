@@ -35,9 +35,12 @@ import ChatLogPanel from "../components/canvas/ChatLogPanel";
 import type { ExecutionRecord } from "../utils/executionLog";
 import AiChatPanel from "../components/canvas/AiChatPanel";
 import { getSettings } from "../utils/settings";
+import TutorialModal from "../components/tutorial/TutorialModal";
+import InteractiveTour, { TOUR_ACTIVE_KEY } from "../components/tutorial/InteractiveTour";
+import { markTourSeen, tourSeen } from "../utils/tour";
 
 const RESUME_WINDOW_MS = 15 * 60 * 1000;   // запуск старше 15 минут считаем потерянным и не подхватываем
-const LISTENER_TYPES = ["telegram_trigger", "webhook", "schedule"];
+const LISTENER_TYPES = ["telegram_trigger", "webhook", "schedule", "email_trigger"];
 
 const nodeTypes = {
     manual: CanvasNode,
@@ -55,6 +58,9 @@ const nodeTypes = {
     switch: CanvasNode,
     set: CanvasNode,
     text_input: CanvasNode,
+    email_trigger: CanvasNode,
+    email_send: CanvasNode,
+    text_transform: CanvasNode,
 };
 
 
@@ -123,6 +129,12 @@ function defaultConfig(type: string): Record<string, any> {
             return { values: "" };
         case "schedule":
             return { interval_minutes: 60, test_input: "" };
+        case "email_trigger":
+            return { connection_id: undefined, interval_minutes: 5, test_input: "", test_from: "client@example.com", test_subject: "" };
+        case "email_send":
+            return { connection_id: undefined, to: "{email_from}", subject: "Re: {email_subject}", body: "", as_reply: true };
+        case "text_transform":
+            return { operation: "extract_order", value: "{input}", pattern: "", max_chars: 500 };
         case "webhook":
             return { test_input: "" };
         case "manual":
@@ -186,7 +198,7 @@ function FitViewOnLoad({ nodeCount }: { nodeCount: number }) {
 
 export default function WorkflowEditor() {
     const { id } = useParams();
-    const [searchParams] = useSearchParams();
+    const [searchParams, setSearchParams] = useSearchParams();
     const logParam = Number(searchParams.get("log")) || null;   // переход из истории выполнений
     const navigate = useNavigate();
     const isEditing = !!id;
@@ -217,10 +229,12 @@ export default function WorkflowEditor() {
     const [runProgress, setRunProgress] = useState<Record<string, NodeRunState> | null>(null);
     const [isRunning, setIsRunning] = useState(false);
     const [runFinished, setRunFinished] = useState(false);
+    const [tourActive, setTourActive] = useState(() => sessionStorage.getItem(TOUR_ACTIVE_KEY) === "1");
+    const [welcomeOpen, setWelcomeOpen] = useState(false);
     const pollTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
     const [showLog, setShowLog] = useState(logParam !== null);
     const [showAiChat, setShowAiChat] = useState(false);
-    const [isActive, setIsActive] = useState(false);        // воркфлоу «запущен»: слушает Telegram/Webhook/Schedule
+    const [isActive, setIsActive] = useState(false);        // сценарий «включён»: слушает Telegram/Webhook/Schedule
     const [isToggling, setIsToggling] = useState(false);
     const [runningExecutionId, setRunningExecutionId] = useState<number | null>(null);
     const [executions, setExecutions] = useState<ExecutionRecord[]>([]);
@@ -254,7 +268,7 @@ export default function WorkflowEditor() {
     };
 
     const clearLogs = async () => {
-        if (!window.confirm(`Удалить запуски этого воркфлоу (${executions.length}) из истории выполнений?`)) return;
+        if (!window.confirm(`Удалить запуски этого сценария (${executions.length}) из истории запусков?`)) return;
         const { error } = await api.bulkDeleteExecutions(executions.map((e) => e.id));
         if (error) {
             alert(`Ошибка: ${error}`);
@@ -281,7 +295,9 @@ export default function WorkflowEditor() {
 
     const genId = (type: string) => {
         idCounter.current += 1;
-        return `${type}_${Date.now()}_${idCounter.current}`;
+        // Короткий id: префикс типа + счётчик (читаемо и не вылезает из ноды)
+        const prefix = type.replace(/_/g, "").slice(0, 8);
+        return `${prefix}_${idCounter.current}`;
     };
 
     const addNode = (type: string) => {
@@ -372,6 +388,31 @@ export default function WorkflowEditor() {
 
     const selectedNode = nodes.find((n) => n.id === selectedId);
 
+    const startTour = () => {
+        sessionStorage.setItem(TOUR_ACTIVE_KEY, "1");
+        sessionStorage.removeItem("flowmind.tour.step");
+        markTourSeen();
+        setWelcomeOpen(false);
+        setTourActive(true);
+    };
+    const stopTour = () => {
+        sessionStorage.removeItem(TOUR_ACTIVE_KEY);
+        sessionStorage.removeItem("flowmind.tour.step");
+        setTourActive(false);
+    };
+
+    useEffect(() => {
+        if (searchParams.get("tour") === "1") {
+            startTour();
+            const next = new URLSearchParams(searchParams);
+            next.delete("tour");
+            setSearchParams(next, { replace: true });
+        } else if (!isEditing && !tourSeen() && !tourActive) {
+            setWelcomeOpen(true);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [searchParams, isEditing]);
+
     const buildPayload = () => ({
         name,
         description,
@@ -441,8 +482,8 @@ export default function WorkflowEditor() {
             if (progress && progress.status !== "running") {
                 setRunStatus(
                     progress.status === "cancelled"
-                        ? `Остановлено — execution #${executionId}`
-                        : `Готово — execution #${executionId} (${progress.status})`,
+                        ? `Остановлено — запуск №${executionId}`
+                        : `Запуск №${executionId} завершён: ${progress.status === "success" ? "успешно" : "с ошибкой"}`,
                 );
                 setRunFinished(true);
                 setIsRunning(false);
@@ -454,7 +495,7 @@ export default function WorkflowEditor() {
                 return;
             }
             if (attempt > 600) {   // ~5 минут без завершения — перестаём ждать, запуск продолжится на сервере
-                setRunStatus("Запуск продолжается на сервере — смотри историю выполнений");
+                setRunStatus("Запуск продолжается на сервере — результат появится в истории запусков");
                 setIsRunning(false);
                 setRunningExecutionId(null);
                 return;
@@ -467,7 +508,7 @@ export default function WorkflowEditor() {
     /** Разовый запуск (Run / Тест): сохраняет граф, чтобы выполнялось то, что на холсте; тестовые данные берутся из триггера. */
     const runWorkflow = async () => {
         if (!isEditing) {
-            alert("Сохрани workflow перед запуском");
+            alert("Сначала сохраните сценарий");
             return;
         }
         if (isRunning) return;
@@ -489,7 +530,7 @@ export default function WorkflowEditor() {
     /** Запуск/остановка воркфлоу с триггерами: пока он запущен, Telegram/Webhook/Schedule срабатывают. Состояние хранится на сервере. */
     const toggleActive = async () => {
         if (!isEditing) {
-            alert("Сохрани workflow перед запуском");
+            alert("Сначала сохраните сценарий");
             return;
         }
         setIsToggling(true);
@@ -500,7 +541,7 @@ export default function WorkflowEditor() {
             if (error) alert(`Error: ${error}`);
             else if (data) {
                 setIsActive(data.is_active);
-                setRunStatus(data.is_active ? "Запущен — принимает новые события" : "Остановлен");
+                setRunStatus(null);
             }
         }
         setIsToggling(false);
@@ -515,7 +556,7 @@ export default function WorkflowEditor() {
                         <input
                             value={name}
                             onChange={(e) => setName(e.target.value)}
-                            placeholder="Название workflow"
+                            placeholder="Название сценария"
                             className="text-lg font-bold text-gray-900 border-none outline-none focus:ring-0 bg-transparent"
                         />
                         <button
@@ -537,10 +578,10 @@ export default function WorkflowEditor() {
                                 className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
                                     isActive ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"
                                 }`}
-                                title="Запущенный воркфлоу принимает только новые события (сообщения после запуска)"
+                                title="Включённый сценарий реагирует только на новые события: сообщения и письма, которые придут после включения"
                             >
                                 <span className={`h-2 w-2 rounded-full ${isActive ? "bg-emerald-500 animate-pulse" : "bg-gray-400"}`} />
-                                {isActive ? "Слушает" : "Остановлен"}
+                                {isActive ? "Включён" : "Выключен"}
                             </span>
                         )}
                         <button
@@ -553,7 +594,7 @@ export default function WorkflowEditor() {
                                     : "border-gray-200 text-gray-600 hover:bg-gray-50"
                             }`}
                         >
-                            <Sparkles className="w-4 h-4" /> AI-чат
+                            <Sparkles className="w-4 h-4" /> ИИ помощник
                         </button>
                         <button
                             onClick={() => setShowLog((v) => !v)}
@@ -563,7 +604,7 @@ export default function WorkflowEditor() {
                                     : "border-gray-200 text-gray-600 hover:bg-gray-50"
                             }`}
                         >
-                            <Terminal className="w-4 h-4" /> Лог
+                            <Terminal className="w-4 h-4" /> Журнал
                         </button>
                         {hasListener ? (
                             <button
@@ -574,10 +615,11 @@ export default function WorkflowEditor() {
                                 }`}
                             >
                                 {isActive ? <Square className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                                {isActive ? "Стоп" : "Запустить"}
+                                {isActive ? "Выключить" : "Включить"}
                             </button>
                         ) : (
                             <button
+                                data-tour="run"
                                 onClick={isRunning ? stopRun : runWorkflow}
                                 disabled={!isEditing}
                                 className={`flex items-center gap-2 px-4 py-1.5 text-white rounded-lg disabled:opacity-50 text-sm font-medium ${
@@ -585,16 +627,17 @@ export default function WorkflowEditor() {
                                 }`}
                             >
                                 {isRunning ? <Square className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                                {isRunning ? "Стоп" : "Run"}
+                                {isRunning ? "Остановить" : "Запустить"}
                             </button>
                         )}
                         <button
+                            data-tour="save"
                             onClick={handleSave}
                             disabled={isLoading}
                             className="flex items-center gap-2 px-4 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
                         >
                             <Save className="w-4 h-4" />{" "}
-                            {isLoading ? "Сохранение..." : "Save"}
+                            {isLoading ? "Сохранение..." : "Сохранить"}
                         </button>
                     </div>
                 </div>
@@ -602,7 +645,7 @@ export default function WorkflowEditor() {
                 <NodePalette onAdd={addNode} />
 
                 <div className="flex-1 flex min-h-0">
-                    <div className="flex-1 relative">
+                    <div className="flex-1 relative" data-tour="canvas">
                         <RunProgressContext.Provider value={runProgress}>
                         <ReactFlowProvider>
                             <ReactFlow
@@ -648,7 +691,7 @@ export default function WorkflowEditor() {
                         {nodes.length === 0 && (
                             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                                 <p className="text-gray-400 text-sm">
-                                    Добавь ноду из панели инструментов, чтобы начать
+                                    Добавьте первый шаг: выберите вкладку «Запуск» вверху и нажмите на нужный запуск
                                 </p>
                             </div>
                         )}
@@ -699,7 +742,7 @@ export default function WorkflowEditor() {
                     onMouseDown={(e) => e.target === e.currentTarget && setDescriptionDraft(null)}
                 >
                     <div className="w-full max-w-lg rounded-xl bg-white p-5 shadow-2xl">
-                        <h3 className="text-base font-semibold text-gray-900">Описание воркфлоу</h3>
+                        <h3 className="text-base font-semibold text-gray-900">Описание сценария</h3>
                         <textarea
                             autoFocus
                             value={descriptionDraft}
@@ -707,7 +750,7 @@ export default function WorkflowEditor() {
                             onKeyDown={(e) => e.key === "Escape" && setDescriptionDraft(null)}
                             maxLength={1000}
                             rows={6}
-                            placeholder="Что делает этот воркфлоу..."
+                            placeholder="Что делает этот сценарий..."
                             className="mt-3 w-full rounded-lg border border-gray-200 p-3 text-sm outline-none focus:border-blue-400"
                         />
                         <div className="mt-1 text-right text-xs text-gray-400">{descriptionDraft.length}/1000</div>
@@ -730,6 +773,37 @@ export default function WorkflowEditor() {
                         </div>
                     </div>
                 </div>
+            )}
+
+            <TutorialModal
+                open={welcomeOpen}
+                mode="welcome"
+                onClose={() => {
+                    markTourSeen();
+                    setWelcomeOpen(false);
+                }}
+                onStartInteractive={startTour}
+            />
+            {tourActive && (
+                <InteractiveTour
+                    onClose={stopTour}
+                    onAdvance={(from) => {
+                        // После добавления нейросети панель открыта автоматически — сбрасываем выбор,
+                        // чтобы шаг «Настройте шаг» ждал явного клика по карточке.
+                        if (from === "llm") setSelectedId(null);
+                    }}
+                    progress={{
+                        nodes: nodes.map((n) => ({
+                            id: n.id,
+                            type: String(n.type),
+                            prompt: String((n.data?.config as Record<string, unknown> | undefined)?.prompt ?? ""),
+                        })),
+                        edgesCount: edges.length,
+                        selectedType: selectedNode ? String(selectedNode.type) : null,
+                        hasRun: runFinished || runProgress !== null,
+                        saved: isEditing,
+                    }}
+                />
             )}
         </div>
     );

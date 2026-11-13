@@ -19,22 +19,28 @@ export default function BillingReturn() {
         const id = Number(params.get("payment"));
         let attempts = 0;
         let stopped = false;
+        let timer: ReturnType<typeof setTimeout> | undefined;
         const poll = async () => {
             if (stopped) return;
             const { data } = await api.getPayment(id);
+            if (stopped) return;                       // пользователь ушёл со страницы, пока шёл запрос
             if (data?.status === "succeeded") {
                 await loadMe();
-                return setStatus("succeeded");
+                if (!stopped) setStatus("succeeded");
+                return;
             }
             if (data?.status === "failed" || data?.status === "canceled") {
                 setReason(data.failure_reason);
                 return setStatus("failed");
             }
             if (++attempts > 30) return setStatus("timeout");
-            setTimeout(poll, 2000);
+            timer = setTimeout(poll, 2000);
         };
         void poll();
-        return () => { stopped = true; };
+        return () => {
+            stopped = true;
+            clearTimeout(timer);                       // не оставляем лишний запрос после ухода со страницы
+        };
     }, []);
 
     return (

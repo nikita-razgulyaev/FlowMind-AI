@@ -46,7 +46,7 @@ async def public_config():
         "require_email_verification": settings.require_email_verification,
         "default_llm_mode": settings.default_llm_mode,
         "ollama_model": settings.ollama_model,
-        "platform_ai_available": bool(settings.platform_llm_api_key) and ai_enabled,
+        "platform_ai_available": settings.platform_llm_configured and ai_enabled,
         "telegram_mode": settings.effective_telegram_mode,
         "languages": ["ru"],
     }

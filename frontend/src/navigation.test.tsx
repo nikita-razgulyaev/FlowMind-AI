@@ -110,7 +110,7 @@ describe("навигация для вошедшего", () => {
     it("приложение ↔ тарифы ↔ презентация", async () => {
         const user = userEvent.setup();
         await openApp("/", true);
-        expect(await screen.findByTitle("Воркфлоу")).toBeTruthy();                        // это приложение (боковая панель), а не лендинг
+        expect(await screen.findByTitle("Мои сценарии")).toBeTruthy();                        // это приложение (боковая панель), а не лендинг
         expect(screen.queryByRole("heading", { name: /Собирайте AI-автоматизации/ })).toBeNull();
 
         await user.click(screen.getByTitle("Личный кабинет"));                           // кабинет — в боковой панели приложения
@@ -124,11 +124,11 @@ describe("навигация для вошедшего", () => {
         await user.click(header().getByRole("link", { name: "Возможности" }));
         expect(await screen.findByRole("heading", { level: 1, name: /Собирайте AI-автоматизации/ })).toBeTruthy();
         await user.click(header().getByRole("link", { name: "Открыть приложение" }));
-        expect(await screen.findByTitle("Воркфлоу")).toBeTruthy();
+        expect(await screen.findByTitle("Мои сценарии")).toBeTruthy();
     });
 
     it("вошедшего не пускают на страницы входа и регистрации", async () => {
         await openApp("/login", true);
-        expect(await screen.findByTitle("Воркфлоу")).toBeTruthy();
+        expect(await screen.findByTitle("Мои сценарии")).toBeTruthy();
     });
 });

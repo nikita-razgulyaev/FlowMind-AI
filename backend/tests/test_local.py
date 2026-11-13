@@ -35,7 +35,7 @@ def test_ollama_generation(client, fake_net):
     out = client.post(f"{API}/workflows/{wid}/execute", json={"input": "мир"}).json()
     assert out["status"] == "success"
     assert out["result"]["l"].startswith("ollama:qwen2.5:Скажи: мир")      # модель по умолчанию из OLLAMA_MODEL
-    assert not [r for r in fake_net.requests if r.url.host == "router.huggingface.co"]
+    assert not [r for r in fake_net.requests if r.url.host == "api.orcarouter.ai"]
 
 
 def test_templates_switch_to_ollama(client):
@@ -95,7 +95,7 @@ def test_telegram_long_polling(client, fake_net):
                     {"id": "say", "type": "telegram_send", "config": {"connection_id": cid, "message": "эхо: {input}"}}],
           "edges": [{"id": "e", "from_node": "trg", "to_node": "say", "type": "next"}]}
     assert client.post(f"{API}/workflows/", json=wf).status_code == 200
-    assert not fake_net.telegram_calls                                    # в локальном режиме вебхуки не регистрируются
+    assert not [c for c in fake_net.telegram_calls if c[0] != "getMe"]                                    # в локальном режиме вебхуки не регистрируются
     fake_net.tg_updates.append({"update_id": 777001, "message": {"message_id": 1, "text": "ping", "chat": {"id": 42},
                                                                   "from": {"id": 42, "username": "u"}}})
 

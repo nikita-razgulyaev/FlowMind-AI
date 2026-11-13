@@ -22,7 +22,7 @@ interface ChatItem extends AiChatMessage {
 const SUGGESTIONS = [
     "Telegram-бот поддержки: агент отвечает на вопросы клиентов",
     "По кнопке Run получить погоду по HTTP и коротко пересказать через LLM",
-    "Добавь условие: если ответ длиннее 200 символов — отправить в Telegram",
+    "Добавьте условие: если ответ длиннее 200 символов — отправить в Telegram",
 ];
 
 export default function AiChatPanel({ getGraph, onApply }: Props) {
@@ -103,7 +103,7 @@ export default function AiChatPanel({ getGraph, onApply }: Props) {
                             {item.workflow && (
                                 <div className="mt-2 pt-2 border-t border-gray-200">
                                     <p className="text-[11px] text-gray-500 mb-1.5">
-                                        Граф: {item.workflow.nodes.length} нод, {item.workflow.edges.length} связей
+                                        Сценарий: шагов — {item.workflow.nodes.length}, {item.workflow.edges.length} связей
                                     </p>
                                     <button
                                         onClick={() => apply(i)}
@@ -115,7 +115,7 @@ export default function AiChatPanel({ getGraph, onApply }: Props) {
                                                 <Check className="w-3 h-3" /> Применено
                                             </>
                                         ) : (
-                                            "Применить к холсту"
+                                            "Применить к рабочей области"
                                         )}
                                     </button>
                                 </div>

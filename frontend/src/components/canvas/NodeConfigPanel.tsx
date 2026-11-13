@@ -4,6 +4,9 @@ import type { WorkflowNode, Connection } from "../../types/workflow";
 import { api } from "../../api/client";
 import { NODE_META } from "./CanvasNode";
 import { useAuth } from "../../store/auth";
+import ToolSettingsFields, { TOOL_PRESETS } from "./ToolSettings";
+import { NODE_INFO } from "../../utils/glossary";
+import { OPERATIONS, TEXT_OPERATIONS } from "../../utils/textOperations";
 
 const LLM_MODELS = {
     local: [
@@ -11,14 +14,10 @@ const LLM_MODELS = {
         { value: "llama3.1", label: "Llama 3.1 (Ollama)" },
         { value: "mistral", label: "Mistral (Ollama)" },
     ],
-    cloud: [
-        { value: "", label: "По умолчанию (модель сервиса / подключения)" },
-        { value: "gpt-4o-mini", label: "GPT-4o mini (OpenAI-совместимый)" },
-        { value: "openai/gpt-oss-120b:groq", label: "gpt-oss-120b (Hugging Face router)" },
-    ],
 };
 
 const label = "block text-xs font-medium text-gray-500 mb-1";
+const mono = "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500";
 const input =
     "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500";
 
@@ -30,56 +29,86 @@ interface Props {
     onClose: () => void;
 }
 
-function ToolSettingsFields({
+interface PlatformModel {
+    name: string;
+    model: string;
+    main: boolean;
+}
+
+/** Выбор модели: для встроенного AI — модели из секретов сервера (основная выбрана по умолчанию), для своего подключения — модели из него. */
+function ModelPicker({
     cfg,
     set,
-    defaultProps,
+    aiConnections,
+    platformModels,
 }: {
     cfg: Record<string, any>;
     set: (patch: Record<string, any>) => void;
-    defaultProps: Record<string, any>;
+    aiConnections: Connection[];
+    platformModels: PlatformModel[];
 }) {
+    const isLocal = cfg.mode === "local";
+    const conn = isLocal ? undefined : aiConnections.find((c) => c.id === cfg.connection_id);
+    const own = String(conn?.config?.models || "")
+        .split(",")
+        .map((m) => m.trim())
+        .filter(Boolean);
+    const main = platformModels.find((m) => m.main);
+
+    let options: { value: string; label: string }[];
+    let emptyHint: string | null = null;
+    if (isLocal) {
+        options = LLM_MODELS.local;
+    } else if (conn) {
+        if (own.length === 0) {
+            options = [{ value: "", label: "Нет моделей" }];
+            emptyHint = "В подключении не указаны модели. Добавьте их в разделе «Подключения».";
+        } else {
+            options = [{ value: "", label: "По умолчанию подключения" }, ...own.map((m) => ({ value: m, label: m }))];
+        }
+    } else if (platformModels.length === 0) {
+        options = [{ value: "", label: "Нет моделей" }];
+        emptyHint = "Встроенные модели не настроены на сервере (PLATFORM_LLM_PROVIDERS / ключи в .env).";
+    } else {
+        options = [
+            { value: "", label: main ? `По умолчанию: ${main.model}` : "По умолчанию (модель сервиса)" },
+            ...platformModels.map((m) => ({ value: m.model, label: `${m.model} — ${m.main ? "основная" : "запасная"}` })),
+        ];
+    }
+
+    // Только встроенные модели (из .env / platform) и модели из подключений пользователя — без ручного ввода
     return (
-        <div className="pt-2 border-t border-gray-100">
-            <p className="text-xs font-medium text-gray-500 mb-2">
-                Настройки инструмента (если нода подключена к агенту)
-            </p>
-            <label className={label}>Tool name</label>
-            <input
-                value={cfg.tool_name || ""}
-                onChange={(e) => set({ tool_name: e.target.value })}
-                placeholder="get_order_status"
-                className={`${input} mb-2`}
-            />
-            <label className={label}>Tool description (для модели)</label>
-            <input
-                value={cfg.tool_description || ""}
-                onChange={(e) => set({ tool_description: e.target.value })}
-                placeholder="Получить статус заказа по ID"
-                className={`${input} mb-2`}
-            />
-            <label className={label}>Parameters schema (JSON)</label>
-            <textarea
-                value={
-                    typeof cfg.tool_parameters === "string"
-                        ? cfg.tool_parameters
-                        : JSON.stringify(
-                              cfg.tool_parameters ?? defaultProps,
-                              null,
-                              2,
-                          )
-                }
-                onChange={(e) => {
-                    try {
-                        set({ tool_parameters: JSON.parse(e.target.value) });
-                    } catch {
-                        set({ tool_parameters: e.target.value });
-                    }
-                }}
-                rows={6}
+        <div>
+            <label className={label}>Модель</label>
+            <select
+                value={cfg.model ?? ""}
+                onChange={(e) => set({ model: e.target.value })}
                 className={input}
-            />
+                disabled={!!emptyHint}
+            >
+                {options.map((o) => (
+                    <option key={o.value || "default"} value={o.value}>
+                        {o.label}
+                    </option>
+                ))}
+            </select>
+            {emptyHint && <p className="text-xs text-amber-600 mt-1">{emptyHint}</p>}
+            {!isLocal && !conn && platformModels.length > 1 && (
+                <p className="text-xs text-gray-400 mt-1">Если выбранная модель не ответит, сервис автоматически переключится на другую.</p>
+            )}
         </div>
+    );
+}
+
+function ConnectHint({ what }: { what: string }) {
+    return (
+        <p className="text-xs text-amber-600 mt-1">
+            Нет подключений: {what}.{" "}
+            <a href="/connections" target="_blank" rel="noreferrer" className="underline hover:text-amber-700">
+                Добавить подключение
+            </a>{" "}
+            (откроется в новой вкладке), затем вернитесь и выберите его в списке.
+        </p>
     );
 }
 
@@ -94,12 +123,12 @@ function TestInputField({
 }) {
     return (
         <div>
-            <label className={label}>Тестовые данные для кнопки Run → {"{input}"}</label>
+            <label className={label}>Тестовое сообщение для кнопки «Запустить» (подставится в {"{input}"})</label>
             <textarea
                 value={cfg.test_input || ""}
                 onChange={(e) => set({ test_input: e.target.value })}
                 rows={4}
-                placeholder={hint || "Текст, который подставится в {input} при ручном запуске"}
+                placeholder={hint || "Текст, который подставится вместо сообщения клиента при проверке"}
                 className={input}
             />
         </div>
@@ -132,7 +161,7 @@ function TextInputFields({
     return (
         <>
             <div>
-                <label className={label}>Текст → {"{id_ноды}"}</label>
+                <label className={label}>Текст (в других шагах доступен как {"{имя_шага}"})</label>
                 <textarea
                     value={cfg.text || ""}
                     onChange={(e) => set({ text: e.target.value, file_name: "" })}
@@ -172,11 +201,11 @@ function WebhookUrl({ workflowId }: { workflowId?: number }) {
         api.getWebhookUrl(workflowId).then(({ data }) => data && setUrl(data.url));
     }, [workflowId]);
     if (!workflowId) {
-        return <p className="text-xs text-amber-600">Сохрани воркфлоу — появится URL вебхука.</p>;
+        return <p className="text-xs text-amber-600">Сохраните сценарий — появится ссылка для вызова (webhook).</p>;
     }
     return (
         <div>
-            <label className={label}>URL вебхука (GET или POST, воркфлоу должен быть активен)</label>
+            <label className={label}>Ссылка для вызова (GET или POST). Сценарий должен быть включён</label>
             <input readOnly value={url} onFocus={(e) => e.target.select()} className={input} />
             <p className="text-xs text-gray-400 mt-1">
                 Тело запроса: {"{input}"} — текст, {"{webhook.body.поле}"} — поле JSON, {"{webhook.query.параметр}"} — query-параметр.
@@ -208,6 +237,10 @@ export default function NodeConfigPanel({
     }, []);
 
     const aiConnections = connections.filter((c) => c.category === "ai_api");
+    const [platformModels, setPlatformModels] = useState<PlatformModel[]>([]);
+    useEffect(() => {
+        api.getAiModels().then(({ data }) => data && setPlatformModels(data.models));
+    }, []);
     const openaiConnections = aiConnections.filter(
         (c) => c.provider === "openai_compatible" || c.provider === "huggingface",
     );
@@ -215,11 +248,15 @@ export default function NodeConfigPanel({
         (c) => c.category === "tool" && c.provider === "telegram_bot",
     );
     const sheetsConnections = connections.filter(
-        (c) => c.category === "tool" && c.provider === "google_sheets",
+        (c) => c.category === "tool" && (c.provider === "google_sheets" || c.provider === "yandex_sheets"),
     );
+    const MAIL_PROVIDERS = ["email", "google_gmail", "yandex_mail", "mailru_mail"];
+    const emailConnections = connections.filter((c) => c.category === "tool" && MAIL_PROVIDERS.includes(c.provider));
     const calendarConnections = connections.filter(
-        (c) => c.category === "tool" && c.provider === "google_calendar",
+        (c) => c.category === "tool" && (c.provider === "google_calendar" || c.provider === "yandex_calendar"),
     );
+    const selectedCalendar = calendarConnections.find((c) => c.id === cfg.connection_id);
+    const isYandexCalendar = selectedCalendar?.provider === "yandex_calendar";
 
     return (
         <div className="w-96 shrink-0 bg-white border-l border-gray-200 h-full overflow-y-auto">
@@ -248,6 +285,10 @@ export default function NodeConfigPanel({
                 </div>
             </div>
 
+            {NODE_INFO[node.type] && (
+                <p className="px-4 pt-3 text-xs leading-snug text-gray-500">{NODE_INFO[node.type].hint}</p>
+            )}
+
             <div className="p-4 space-y-4">
                 {node.type === "llm" && (
                     <>
@@ -258,7 +299,7 @@ export default function NodeConfigPanel({
                                     onClick={() =>
                                         set({
                                             mode: m,
-                                            model: LLM_MODELS[m][0].value,
+                                            model: m === "local" ? LLM_MODELS.local[0].value : "",
                                         })
                                     }
                                     className={`flex-1 py-1.5 rounded-lg text-xs font-medium ${
@@ -275,7 +316,7 @@ export default function NodeConfigPanel({
                         {cfg.mode === "cloud" && (
                             <div>
                                 <label className={label}>
-                                    Подключение (Connections → AI API)
+                                    Подключение нейросети (раздел «Подключения»)
                                 </label>
                                 <select
                                     value={cfg.connection_id ?? ""}
@@ -300,25 +341,10 @@ export default function NodeConfigPanel({
                             </div>
                         )}
 
-                        <div>
-                            <label className={label}>Model</label>
-                            <select
-                                value={cfg.model || ""}
-                                onChange={(e) => set({ model: e.target.value })}
-                                className={input}
-                            >
-                                {LLM_MODELS[
-                                    (cfg.mode as "local" | "cloud") || "cloud"
-                                ].map((m) => (
-                                    <option key={m.value} value={m.value}>
-                                        {m.label}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
+                        <ModelPicker cfg={cfg} set={set} aiConnections={aiConnections} platformModels={platformModels} />
                         <div>
                             <label className={label}>
-                                Prompt (используй {"{input}"} или {"{node_id}"})
+                                Запрос к нейросети (промпт). В нём можно использовать {"{input}"} — сообщение клиента — и {"{имя_шага}"} — результат другого шага
                             </label>
                             <textarea
                                 value={cfg.prompt || ""}
@@ -397,22 +423,9 @@ export default function NodeConfigPanel({
                             </div>
                         )}
                         <p className="text-xs text-gray-400">
-                            Ответ-JSON доступен как {"{http_1.json.поле}"}.
+                            Если сервис ответил данными в формате JSON, их можно использовать так: {"{имя_шага.json.поле}"}.
                         </p>
-                        <ToolSettingsFields
-                            cfg={cfg}
-                            set={set}
-                            defaultProps={{
-                                type: "object",
-                                properties: {
-                                    order_id: {
-                                        type: "string",
-                                        description: "ID заказа",
-                                    },
-                                },
-                                required: ["order_id"],
-                            }}
-                        />
+                        <ToolSettingsFields key={node.id} cfg={cfg} set={set} preset={TOOL_PRESETS.http} />
                     </>
                 )}
 
@@ -420,8 +433,7 @@ export default function NodeConfigPanel({
                     <>
                         <div>
                             <label className={label}>
-                                Подключение (Connections → Инструменты →
-                                Telegram Bot)
+                                Подключение: Telegram-бот
                             </label>
                             <select
                                 value={cfg.connection_id ?? ""}
@@ -434,7 +446,7 @@ export default function NodeConfigPanel({
                                 }
                                 className={input}
                             >
-                                <option value="">— выбери подключение —</option>
+                                <option value="">— выберите подключение —</option>
                                 {telegramConnections.map((c) => (
                                     <option key={c.id} value={c.id}>
                                         {c.name}
@@ -442,29 +454,38 @@ export default function NodeConfigPanel({
                                 ))}
                             </select>
                             {telegramConnections.length === 0 && (
-                                <p className="text-xs text-amber-600 mt-1">
-                                    Нет подключений Telegram Bot — добавь на
-                                    странице Подключения
-                                </p>
+                                <ConnectHint what="Telegram Bot" />
                             )}
                         </div>
                         <div>
                             <label className={label}>
-                                Chat ID (можно с {"{param}"})
+                                Куда отправить: ID чата или канал (оставьте пустым — ответ уйдёт тому, кто написал)
                             </label>
                             <input
                                 value={cfg.chat_id || ""}
                                 onChange={(e) =>
                                     set({ chat_id: e.target.value })
                                 }
-                                placeholder="123456789"
+                                placeholder="123456789 или @имя_канала"
                                 className={input}
                             />
+                            <p className="text-xs text-gray-400 mt-1">
+                                Для канала укажите @имя или ссылку t.me/имя и добавьте бота администратором с правом публикации.
+                            </p>
+                        </div>
+                        <div>
+                            <label className={label}>Картинка: прямая ссылка (необязательно)</label>
+                            <input
+                                value={cfg.photo_url || ""}
+                                onChange={(e) => set({ photo_url: e.target.value })}
+                                placeholder="https://example.com/cover.jpg"
+                                className={input}
+                            />
+                            <p className="text-xs text-gray-400 mt-1">С картинкой текст становится подписью (до 1024 знаков), более длинный уходит отдельным сообщением.</p>
                         </div>
                         <div>
                             <label className={label}>
-                                Сообщение (используй {"{node_id}"} для
-                                переменных)
+                                Сообщение (результаты других шагов подставляются в фигурных скобках, например {"{reply}"})
                             </label>
                             <textarea
                                 value={cfg.message || ""}
@@ -476,24 +497,7 @@ export default function NodeConfigPanel({
                                 className={input}
                             />
                         </div>
-                        <ToolSettingsFields
-                            cfg={cfg}
-                            set={set}
-                            defaultProps={{
-                                type: "object",
-                                properties: {
-                                    chat_id: {
-                                        type: "string",
-                                        description: "ID чата",
-                                    },
-                                    message: {
-                                        type: "string",
-                                        description: "Текст сообщения",
-                                    },
-                                },
-                                required: ["chat_id", "message"],
-                            }}
-                        />
+                        <ToolSettingsFields key={node.id} cfg={cfg} set={set} preset={TOOL_PRESETS.telegram_send} />
                     </>
                 )}
 
@@ -501,8 +505,7 @@ export default function NodeConfigPanel({
                     <>
                         <div>
                             <label className={label}>
-                                Подключение (Connections → Инструменты → Google
-                                Таблицы)
+                                Подключение: таблицы
                             </label>
                             <select
                                 value={cfg.connection_id ?? ""}
@@ -515,39 +518,56 @@ export default function NodeConfigPanel({
                                 }
                                 className={input}
                             >
-                                <option value="">— выбери подключение —</option>
+                                <option value="">— выберите подключение —</option>
                                 {sheetsConnections.map((c) => (
                                     <option key={c.id} value={c.id}>
                                         {c.name}
+                                        {c.provider === "yandex_sheets" ? " (Яндекс)" : " (Google)"}
                                     </option>
                                 ))}
                             </select>
                             {sheetsConnections.length === 0 && (
-                                <p className="text-xs text-amber-600 mt-1">
-                                    Нет подключений Google Таблицы — добавь на
-                                    странице Подключения
-                                </p>
+                                <ConnectHint what="Google или Яндекс Таблицы" />
                             )}
                         </div>
+                        {sheetsConnections.find((c) => c.id === cfg.connection_id)?.provider === "yandex_sheets" ? (
+                            <div>
+                                <label className={label}>
+                                    Путь к файлу на Яндекс Диске (CSV)
+                                </label>
+                                <input
+                                    value={cfg.spreadsheet_id || ""}
+                                    onChange={(e) =>
+                                        set({ spreadsheet_id: e.target.value })
+                                    }
+                                    placeholder="disk:/Таблицы/заявки.csv"
+                                    className={input}
+                                />
+                                <p className="text-[11px] text-gray-400 mt-1">
+                                    Полный путь к CSV-файлу на Диске. Строка будет добавлена в конец файла.
+                                </p>
+                            </div>
+                        ) : (
+                            <div>
+                                <label className={label}>
+                                    ID таблицы (часть адреса между /d/ и /edit)
+                                </label>
+                                <input
+                                    value={cfg.spreadsheet_id || ""}
+                                    onChange={(e) =>
+                                        set({ spreadsheet_id: e.target.value })
+                                    }
+                                    placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms"
+                                    className={input}
+                                />
+                                <p className="text-[11px] text-gray-400 mt-1">
+                                    Часть URL таблицы между /d/ и /edit
+                                </p>
+                            </div>
+                        )}
                         <div>
                             <label className={label}>
-                                Spreadsheet ID (можно с {"{param}"})
-                            </label>
-                            <input
-                                value={cfg.spreadsheet_id || ""}
-                                onChange={(e) =>
-                                    set({ spreadsheet_id: e.target.value })
-                                }
-                                placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms"
-                                className={input}
-                            />
-                            <p className="text-[11px] text-gray-400 mt-1">
-                                Часть URL таблицы между /d/ и /edit
-                            </p>
-                        </div>
-                        <div>
-                            <label className={label}>
-                                Range (лист + ячейка)
+                                Лист и ячейка, с которой начать поиск места для записи
                             </label>
                             <input
                                 value={cfg.range || "A1"}
@@ -558,31 +578,18 @@ export default function NodeConfigPanel({
                         </div>
                         <div>
                             <label className={label}>
-                                Значения строки, через запятую (можно с{" "}
-                                {"{param}"})
+                                Значения строки через запятую (можно подставлять данные в фигурных скобках)
                             </label>
                             <input
                                 value={cfg.values || ""}
                                 onChange={(e) =>
                                     set({ values: e.target.value })
                                 }
-                                placeholder="{client_name}, {phone}, {date}"
+                                placeholder="{client_name}, {phone}, {order_id}"
                                 className={input}
                             />
                         </div>
-                        <ToolSettingsFields
-                            cfg={cfg}
-                            set={set}
-                            defaultProps={{
-                                type: "object",
-                                properties: {
-                                    client_name: { type: "string" },
-                                    phone: { type: "string" },
-                                    date: { type: "string" },
-                                },
-                                required: ["client_name"],
-                            }}
-                        />
+                        <ToolSettingsFields key={node.id} cfg={cfg} set={set} preset={TOOL_PRESETS.google_sheets_append} />
                     </>
                 )}
 
@@ -590,8 +597,7 @@ export default function NodeConfigPanel({
                     <>
                         <div>
                             <label className={label}>
-                                Подключение (Connections → Инструменты → Google
-                                Календарь)
+                                Подключение: календарь (Google или Яндекс)
                             </label>
                             <select
                                 value={cfg.connection_id ?? ""}
@@ -604,33 +610,33 @@ export default function NodeConfigPanel({
                                 }
                                 className={input}
                             >
-                                <option value="">— выбери подключение —</option>
+                                <option value="">— выберите подключение —</option>
                                 {calendarConnections.map((c) => (
                                     <option key={c.id} value={c.id}>
-                                        {c.name}
+                                        {c.name}{c.account ? ` (${c.account})` : ""}{c.needs_reauth ? " — нужен повторный вход" : ""}
                                     </option>
                                 ))}
                             </select>
                             {calendarConnections.length === 0 && (
-                                <p className="text-xs text-amber-600 mt-1">
-                                    Нет подключений Google Календарь — добавь на
-                                    странице Подключения
-                                </p>
+                                <ConnectHint what="Google Календарь или Яндекс Календарь" />
                             )}
                         </div>
                         <div>
-                            <label className={label}>Calendar ID</label>
+                            <label className={label}>
+                                {isYandexCalendar ? "Название календаря (пусто — основной)" : "ID календаря Google (primary — основной)"}
+                            </label>
                             <input
-                                value={cfg.calendar_id || "primary"}
+                                value={isYandexCalendar ? (cfg.calendar_id === "primary" ? "" : cfg.calendar_id ?? "") : cfg.calendar_id || "primary"}
                                 onChange={(e) =>
                                     set({ calendar_id: e.target.value })
                                 }
+                                placeholder={isYandexCalendar ? "Например: Работа" : "primary"}
                                 className={input}
                             />
                         </div>
                         <div>
                             <label className={label}>
-                                Название события (можно с {"{param}"})
+                                Название события (данные из других шагов подставляются в фигурных скобках)
                             </label>
                             <input
                                 value={cfg.summary || ""}
@@ -654,7 +660,7 @@ export default function NodeConfigPanel({
                         <div className="grid grid-cols-2 gap-2">
                             <div>
                                 <label className={label}>
-                                    Начало (ISO 8601)
+                                    Начало (например, 2026-08-01T15:00:00+03:00)
                                 </label>
                                 <input
                                     value={cfg.start_datetime || ""}
@@ -667,7 +673,7 @@ export default function NodeConfigPanel({
                             </div>
                             <div>
                                 <label className={label}>
-                                    Конец (ISO 8601)
+                                    Конец (например, 2026-08-01T16:00:00+03:00)
                                 </label>
                                 <input
                                     value={cfg.end_datetime || ""}
@@ -679,32 +685,14 @@ export default function NodeConfigPanel({
                                 />
                             </div>
                         </div>
-                        <ToolSettingsFields
-                            cfg={cfg}
-                            set={set}
-                            defaultProps={{
-                                type: "object",
-                                properties: {
-                                    client_name: { type: "string" },
-                                    start_datetime: {
-                                        type: "string",
-                                        description: "ISO 8601",
-                                    },
-                                    end_datetime: {
-                                        type: "string",
-                                        description: "ISO 8601",
-                                    },
-                                },
-                                required: ["start_datetime", "end_datetime"],
-                            }}
-                        />
+                        <ToolSettingsFields key={node.id} cfg={cfg} set={set} preset={TOOL_PRESETS.google_calendar_create_event} />
                     </>
                 )}
 
                 {node.type === "condition" && (
                     <div>
                         <label className={label}>
-                            Expression (Python eval)
+                            Условие (например, оценка не ниже 7)
                         </label>
                         <input
                             value={cfg.expression || ""}
@@ -715,9 +703,9 @@ export default function NodeConfigPanel({
                             className={input}
                         />
                         <p className="text-xs text-gray-400 mt-1">
-                            Выполнится только выбранная ветка: тяни связь от
-                            true или false. Поля JSON-вывода ноды — через{" "}
-                            {"{node.field}"}.
+                            Выполнится только выбранная ветка: проведите связь от
+                            ветки «true» (условие выполнено) или «false» (не выполнено). Данные из ответа другого шага берутся так:{" "}
+                            {"{имя_шага.поле}"}.
                         </p>
                     </div>
                 )}
@@ -734,7 +722,7 @@ export default function NodeConfigPanel({
                             />
                         </div>
                         <div>
-                            <label className={label}>Ветки (через запятую)</label>
+                            <label className={label}>Варианты (через запятую)</label>
                             <input
                                 value={cfg.cases || ""}
                                 onChange={(e) => set({ cases: e.target.value })}
@@ -742,7 +730,7 @@ export default function NodeConfigPanel({
                                 className={input}
                             />
                             <p className="text-xs text-gray-400 mt-1">
-                                Сравнение без регистра и знаков препинания (допускается вхождение). Не подошло ничего — ветка default.
+                                Сравнение без регистра и знаков препинания (допускается вхождение). Если ни один вариант не подошёл — сработает ветка «default».
                             </p>
                         </div>
                     </>
@@ -759,7 +747,7 @@ export default function NodeConfigPanel({
                             className={input}
                         />
                         <p className="text-xs text-gray-400 mt-1">
-                            Дальше доступны как {"{id_ноды.key}"}.
+                            Дальше доступны как {"{имя_шага.имя}"}.
                         </p>
                     </div>
                 )}
@@ -767,7 +755,7 @@ export default function NodeConfigPanel({
                 {node.type === "print" && (
                     <div>
                         <label className={label}>
-                            Value (используй {"{node_id}"} для переменных)
+                            Что показать (результат другого шага указывается в фигурных скобках, например {"{reply}"})
                         </label>
                         <input
                             value={cfg.value || ""}
@@ -831,19 +819,7 @@ export default function NodeConfigPanel({
                             </div>
                         )}
 
-                        <div>
-                            <label className={label}>Model</label>
-                            <input
-                                value={cfg.model ?? (cfg.mode === "cloud" ? "" : "qwen2.5")}
-                                onChange={(e) => set({ model: e.target.value })}
-                                placeholder={
-                                    cfg.mode === "cloud"
-                                        ? "пусто — модель по умолчанию"
-                                        : "qwen2.5"
-                                }
-                                className={input}
-                            />
-                        </div>
+                        <ModelPicker cfg={cfg} set={set} aiConnections={aiConnections} platformModels={platformModels} />
                         <div>
                             <label className={label}>System prompt</label>
                             <textarea
@@ -908,8 +884,7 @@ export default function NodeConfigPanel({
                             />
                         </div>
                         <p className="text-xs text-gray-400">
-                            Инструменты подключаются связью с нижнего разъёма (↓
-                            инструменты) к HTTP или Telegram-ноде на canvas.
+                            Инструменты подключаются связью от нижнего разъёма агента («↓ инструменты агента») к любому шагу на рабочей области: запросу к сервису, Telegram, таблице, календарю или почте.
                         </p>
                     </>
                 )}
@@ -918,7 +893,7 @@ export default function NodeConfigPanel({
                     <>
                         <div>
                             <label className={label}>
-                                Бот (Подключения → Инструменты → Telegram Bot)
+                                Telegram-бот (раздел «Подключения»)
                             </label>
                             <select
                                 value={cfg.connection_id ?? ""}
@@ -931,7 +906,7 @@ export default function NodeConfigPanel({
                                 }
                                 className={input}
                             >
-                                <option value="">— выбери подключение —</option>
+                                <option value="">— выберите подключение —</option>
                                 {telegramConnections.map((c) => (
                                     <option key={c.id} value={c.id}>
                                         {c.name}
@@ -939,15 +914,12 @@ export default function NodeConfigPanel({
                                 ))}
                             </select>
                             {telegramConnections.length === 0 && (
-                                <p className="text-xs text-amber-600 mt-1">
-                                    Нет подключений Telegram Bot — добавь на
-                                    странице Подключения
-                                </p>
+                                <ConnectHint what="Telegram Bot" />
                             )}
                         </div>
                         <div>
                             <label className={label}>
-                                Разрешённые chat_id (через запятую, пусто — любые)
+                                Разрешённые ID чатов (через запятую; пусто — отвечать всем)
                             </label>
                             <input
                                 value={cfg.allowed_chat_ids || ""}
@@ -958,7 +930,7 @@ export default function NodeConfigPanel({
                                 className={input}
                             />
                             <p className="text-xs text-gray-400 mt-1">
-                                Пусто — бот принимает сообщения от всех пользователей, написанные после запуска воркфлоу.
+                                Пусто — бот принимает сообщения от всех пользователей, написанные после включения сценария.
                             </p>
                         </div>
                         <label className="flex items-center gap-2 text-sm text-gray-600">
@@ -973,11 +945,11 @@ export default function NodeConfigPanel({
                         </label>
                         <p className="text-xs text-gray-400">
                             Сценарий запускается на каждое входящее сообщение боту,
-                            пока воркфлоу активен (переключатель «Активен» в
-                            шапке). Доступны переменные {"{input}"},{" "}
+                            пока сценарий включён (кнопка «Включить» вверху
+                            экрана). Доступны переменные {"{input}"},{" "}
                             {"{telegram_chat_id}"}, {"{telegram_username}"},{" "}
-                            {"{telegram_first_name}"}. Нода Telegram Send с пустым
-                            chat_id отвечает в тот же чат.
+                            {"{telegram_first_name}"}. Шаг «Ответ в Telegram» с пустым
+                            ID чата отвечает в тот же чат.
                         </p>
                         <TestInputField
                             cfg={cfg}
@@ -1009,6 +981,135 @@ export default function NodeConfigPanel({
                     </>
                 )}
 
+
+
+                {node.type === "email_trigger" && (
+                    <>
+                        <div>
+                            <label className={label}>Подключённая почта</label>
+                            <select
+                                value={cfg.connection_id ?? ""}
+                                onChange={(e) => set({ connection_id: e.target.value ? Number(e.target.value) : undefined })}
+                                className={input}
+                            >
+                                <option value="">— выберите подключение —</option>
+                                {emailConnections.map((c) => (
+                                    <option key={c.id} value={c.id}>
+                                        {c.name}{c.account ? ` (${c.account})` : ""}{c.needs_reauth ? " — нужен повторный вход" : ""}
+                                    </option>
+                                ))}
+                            </select>
+                            {emailConnections.length === 0 && <ConnectHint what="почта" />}
+                        </div>
+                        <div>
+                            <label className={label}>Как часто проверять почту, минут</label>
+                            <input
+                                type="number"
+                                min={1}
+                                value={cfg.interval_minutes ?? 5}
+                                onChange={(e) => set({ interval_minutes: Number(e.target.value) || 5 })}
+                                className={input}
+                            />
+                            <p className="text-xs text-gray-400 mt-1">
+                                Обрабатываются только письма, пришедшие после включения сценария. Письма остаются непрочитанными. В облаке минимум 5 минут.
+                                Текст письма доступен в других шагах как {"{input}"}, адрес отправителя — {"{email_from}"}, тема — {"{email_subject}"}.
+                            </p>
+                        </div>
+                        <div>
+                            <label className={label}>Для проверки: адрес отправителя</label>
+                            <input value={cfg.test_from || ""} onChange={(e) => set({ test_from: e.target.value })} placeholder="client@example.com" className={input} />
+                        </div>
+                        <div>
+                            <label className={label}>Для проверки: тема письма</label>
+                            <input value={cfg.test_subject || ""} onChange={(e) => set({ test_subject: e.target.value })} placeholder="Вопрос по заказу" className={input} />
+                        </div>
+                        <TestInputField cfg={cfg} set={set} />
+                    </>
+                )}
+
+                {node.type === "email_send" && (
+                    <>
+                        <div>
+                            <label className={label}>Подключённая почта</label>
+                            <select
+                                value={cfg.connection_id ?? ""}
+                                onChange={(e) => set({ connection_id: e.target.value ? Number(e.target.value) : undefined })}
+                                className={input}
+                            >
+                                <option value="">— выберите подключение —</option>
+                                {emailConnections.map((c) => (
+                                    <option key={c.id} value={c.id}>
+                                        {c.name}{c.account ? ` (${c.account})` : ""}{c.needs_reauth ? " — нужен повторный вход" : ""}
+                                    </option>
+                                ))}
+                            </select>
+                            {emailConnections.length === 0 && <ConnectHint what="почта" />}
+                        </div>
+                        <div>
+                            <label className={label}>Кому (адрес электронной почты)</label>
+                            <input value={cfg.to ?? ""} onChange={(e) => set({ to: e.target.value })} placeholder="{email_from}" className={input} />
+                            <p className="text-xs text-gray-400 mt-1">
+                                {"{email_from}"} — отправитель входящего письма. Можно указать конкретный адрес или результат шага «Обработка текста» с найденным email.
+                            </p>
+                        </div>
+                        <div>
+                            <label className={label}>Тема письма</label>
+                            <input value={cfg.subject ?? ""} onChange={(e) => set({ subject: e.target.value })} placeholder="Re: {email_subject}" className={input} />
+                        </div>
+                        <div>
+                            <label className={label}>Текст письма (результаты других шагов подставляются в фигурных скобках, например {"{reply}"})</label>
+                            <textarea value={cfg.body ?? ""} onChange={(e) => set({ body: e.target.value })} rows={6} className={input} />
+                        </div>
+                        <label className="flex items-center gap-2 text-sm text-gray-700">
+                            <input type="checkbox" checked={!!cfg.as_reply} onChange={(e) => set({ as_reply: e.target.checked })} />
+                            Отправить как ответ в переписке (работает после шага «Новое письмо»)
+                        </label>
+                        <ToolSettingsFields key={node.id} cfg={cfg} set={set} preset={TOOL_PRESETS.email_send} />
+                    </>
+                )}
+
+                {node.type === "text_transform" && (
+                    <>
+                        <div>
+                            <label className={label}>Что сделать с текстом</label>
+                            <select value={cfg.operation || "extract_order"} onChange={(e) => set({ operation: e.target.value })} className={input}>
+                                {(["Поиск", "Очистка"] as const).map((group) => (
+                                    <optgroup key={group} label={group === "Поиск" ? "Найти в тексте" : "Очистить или изменить"}>
+                                        {TEXT_OPERATIONS.filter((o) => o.group === group).map((o) => (
+                                            <option key={o.id} value={o.id}>
+                                                {o.label}
+                                            </option>
+                                        ))}
+                                    </optgroup>
+                                ))}
+                            </select>
+                            <p className="text-xs text-gray-500 mt-1">{OPERATIONS[cfg.operation || "extract_order"]?.hint}</p>
+                        </div>
+                        <div>
+                            <label className={label}>Исходный текст</label>
+                            <input value={cfg.value ?? "{input}"} onChange={(e) => set({ value: e.target.value })} className={mono} />
+                            <p className="text-xs text-gray-400 mt-1">
+                                {"{input}"} — сообщение клиента или текст письма. Можно указать результат другого шага, например {"{reply}"}.
+                            </p>
+                        </div>
+                        {OPERATIONS[cfg.operation || "extract_order"]?.needsPattern && (
+                            <div>
+                                <label className={label}>Шаблон поиска (регулярное выражение)</label>
+                                <input value={cfg.pattern ?? ""} onChange={(e) => set({ pattern: e.target.value })} placeholder="код (\\w+)" className={mono} />
+                            </div>
+                        )}
+                        {OPERATIONS[cfg.operation || "extract_order"]?.needsLength && (
+                            <div>
+                                <label className={label}>Сколько символов оставить</label>
+                                <input type="number" min={1} value={cfg.max_chars ?? 500} onChange={(e) => set({ max_chars: Number(e.target.value) || 500 })} className={input} />
+                            </div>
+                        )}
+                        <p className="text-xs leading-snug text-gray-400">
+                            Результат — текст, он доступен в следующих шагах по имени этого шага, например {"{" + node.id + "}"}. Если ничего не найдено, результат будет пустым.
+                        </p>
+                    </>
+                )}
+
                 {node.type === "schedule" && (
                     <>
                         <div>
@@ -1023,7 +1124,7 @@ export default function NodeConfigPanel({
                                 className={input}
                             />
                             <p className="text-xs text-gray-400 mt-1">
-                                Запускается, пока воркфлоу активен. В облаке минимум 5 минут. Счётчик сбрасывается при перезапуске сервера.
+                                Запускается, пока сценарий включён. В облаке минимум 5 минут. Счётчик сбрасывается при перезапуске сервера.
                             </p>
                         </div>
                         <TestInputField cfg={cfg} set={set} />

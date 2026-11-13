@@ -71,9 +71,9 @@ export default function WorkflowList() {
                 <div className="max-w-4xl mx-auto px-8 py-10">
                     <div className="flex items-center justify-between mb-8">
                         <div>
-                            <h1 className="text-2xl font-bold text-gray-900">Воркфлоу</h1>
+                            <h1 className="text-2xl font-bold text-gray-900">Мои сценарии</h1>
                             <p className="text-sm text-gray-500 mt-1">
-                                Все твои автоматизации и AI-агенты
+                                Все Ваши автоматизации: боты, ответы клиентам, заявки и письма
                             </p>
                         </div>
                         <div className="flex items-center gap-2">
@@ -90,7 +90,7 @@ export default function WorkflowList() {
                                 onClick={() => navigate("/workflow/new")}
                                 className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
                             >
-                                <Plus className="w-4 h-4" /> Новый workflow
+                                <Plus className="w-4 h-4" /> Новый сценарий
                             </button>
                         </div>
                     </div>
@@ -99,12 +99,12 @@ export default function WorkflowList() {
                         <p className="text-sm text-gray-400">Загрузка...</p>
                     ) : workflows.length === 0 ? (
                         <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
-                            <p className="text-gray-500 mb-4">Пока нет ни одного workflow</p>
+                            <p className="text-gray-500 mb-4">Пока нет ни одного сценария</p>
                             <button
                                 onClick={() => navigate("/workflow/new")}
                                 className="text-blue-600 hover:underline text-sm font-medium"
                             >
-                                Создать первый →
+                                Создать первый сценарий →
                             </button>
                         </div>
                     ) : (
@@ -154,27 +154,44 @@ export default function WorkflowList() {
                                         >
                                             <div className="flex items-center justify-between gap-3">
                                                 <div className="min-w-0">
-                                                    <p className="font-semibold text-gray-900 truncate">
-                                                        {wf.name || "Без названия"}
-                                                    </p>
+                                                    <div className="flex items-center gap-2">
+                                                        <p className="font-semibold text-gray-900 truncate">
+                                                            {wf.name || "Без названия"}
+                                                        </p>
+                                                        <span
+                                                            className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full font-medium ${
+                                                                wf.is_active
+                                                                    ? "bg-green-50 text-green-700"
+                                                                    : "bg-gray-100 text-gray-500"
+                                                            }`}
+                                                        >
+                                                            {wf.is_active ? "Включён" : "Выключен"}
+                                                        </span>
+                                                    </div>
                                                     {wf.description && (
                                                         <p className="text-sm text-gray-500 mt-0.5 truncate">
                                                             {wf.description}
                                                         </p>
                                                     )}
                                                     <div className="flex gap-1.5 mt-2 flex-wrap">
-                                                        {wf.nodes.map((n) => {
-                                                            const meta =
-                                                                NODE_META[n.type] ?? NODE_META.print;
-                                                            return (
-                                                                <span
-                                                                    key={n.id}
-                                                                    className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${meta.badge}`}
-                                                                >
-                                                                    {meta.label}
-                                                                </span>
-                                                            );
-                                                        })}
+                                                        {(() => {
+                                                            const typeCounts = new Map<string, number>();
+                                                            for (const n of wf.nodes) {
+                                                                typeCounts.set(n.type, (typeCounts.get(n.type) || 0) + 1);
+                                                            }
+                                                            return [...typeCounts.entries()].map(([type, count]) => {
+                                                                const meta = NODE_META[type] ?? NODE_META.print;
+                                                                return (
+                                                                    <span
+                                                                        key={type}
+                                                                        className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${meta.badge}`}
+                                                                    >
+                                                                        {meta.label}
+                                                                        {count > 1 ? ` ×${count}` : ""}
+                                                                    </span>
+                                                                );
+                                                            });
+                                                        })()}
                                                     </div>
                                                 </div>
                                                 <button
@@ -197,11 +214,11 @@ export default function WorkflowList() {
             {confirmOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
                     <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
-                        <h2 className="text-lg font-semibold text-gray-900">Удалить воркфлоу?</h2>
+                        <h2 className="text-lg font-semibold text-gray-900">Удалить сценарий?</h2>
                         <p className="text-sm text-gray-600 mt-2">
                             {selected.size === 1
-                                ? "Воркфлоу и вся его история выполнений будут удалены безвозвратно."
-                                : `Будет удалено воркфлоу: ${selected.size}. История выполнений по ним тоже удалится.`}
+                                ? "Сценарий и вся его история запусков будут удалены безвозвратно."
+                                : `Будет удалено сценариев: ${selected.size}. История их запусков тоже удалится.`}
                         </p>
                         <div className="flex justify-end gap-2 mt-6">
                             <button

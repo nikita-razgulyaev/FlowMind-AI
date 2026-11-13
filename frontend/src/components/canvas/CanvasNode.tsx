@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect } from "react";
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
+import { NODE_INFO } from "../../utils/glossary";
 import {
     Play,
     Clock,
@@ -16,6 +17,9 @@ import {
     Split,
     Variable,
     FileText,
+    Mail,
+    MailPlus,
+    ScanText,
     Check,
     Loader2,
     X,
@@ -66,6 +70,9 @@ export const MINIMAP_COLORS: Record<string, string> = {
     telegram_trigger: "#06b6d4",
     webhook: "#ec4899",
     schedule: "#a855f7",
+    email_trigger: "#0891b2",
+    email_send: "#0284c7",
+    text_transform: "#0d9488",
     http: "#f97316",
     telegram_send: "#0ea5e9",
     google_sheets_append: "#22c55e",
@@ -180,6 +187,46 @@ export const NODE_META: Record<
         badge: "bg-red-100 text-red-700",
         ring: "border-red-200",
     },
+    email_trigger: {
+        label: "Новое письмо",
+        icon: Mail,
+        badge: "bg-sky-100 text-sky-700",
+        ring: "border-sky-200",
+    },
+    email_send: {
+        label: "Отправить письмо",
+        icon: MailPlus,
+        badge: "bg-blue-100 text-blue-700",
+        ring: "border-blue-200",
+    },
+    text_transform: {
+        label: "Обработка текста",
+        icon: ScanText,
+        badge: "bg-teal-100 text-teal-700",
+        ring: "border-teal-200",
+    },
+};
+
+// Понятные русские названия берутся из единого словаря подсказок
+for (const [type, info] of Object.entries(NODE_INFO)) {
+    if (NODE_META[type]) NODE_META[type].label = info.label;
+}
+
+const OPERATION_LABELS: Record<string, string> = {
+    extract_email: "найти email",
+    extract_phone: "найти телефон",
+    extract_order: "найти номер заказа",
+    extract_date: "найти дату",
+    extract_amount: "найти сумму",
+    extract_url: "найти ссылку",
+    extract_regex: "найти по шаблону",
+    normalize: "привести к простому виду",
+    clean_email: "очистить письмо",
+    first_line: "первая строка",
+    truncate: "обрезать текст",
+    lower: "строчные буквы",
+    upper: "ЗАГЛАВНЫЕ буквы",
+    trim: "убрать лишние пробелы",
 };
 
 function preview(type: string, config: Record<string, any>): string {
@@ -187,11 +234,11 @@ function preview(type: string, config: Record<string, any>): string {
         case "telegram_trigger":
             return config.connection_id ? "входящее сообщение бота" : "выберите бота";
         case "llm":
-            return config.prompt || "no prompt";
+            return config.prompt || "Не заполнен запрос к нейросети";
         case "http":
             return (
                 `${config.method || "GET"} ${config.url || ""}`.trim() ||
-                "no url"
+                "Не указан адрес"
             );
         case "condition":
             return config.expression || "True";
@@ -200,23 +247,29 @@ function preview(type: string, config: Record<string, any>): string {
         case "switch":
             return config.value || "{input}";
         case "set":
-            return config.values || "key=value";
+            return config.values || "имя=значение";
+        case "email_trigger":
+            return config.connection_id ? "входящее письмо" : "подключите почту";
+        case "email_send":
+            return config.to ? `→ ${config.to}` : "→ отправителю письма";
+        case "text_transform":
+            return OPERATION_LABELS[config.operation as string] || "выберите действие";
         case "schedule":
             return `каждые ${config.interval_minutes || 60} мин`;
         case "webhook":
-            return "HTTP-вызов URL воркфлоу";
+            return "вызов по ссылке сценария";
         case "print":
             return config.value || "{last_result}";
         case "agent":
-            return config.system_prompt || "no system prompt";
+            return config.system_prompt || "Не заполнена инструкция";
         case "telegram_send":
-            return config.chat_id ? `→ ${config.chat_id}` : "no chat_id";
+            return config.chat_id ? `→ ${config.chat_id}` : "ответ в тот же чат";
         case "google_sheets_append":
             return config.spreadsheet_id
                 ? `→ ${config.spreadsheet_id.slice(0, 20)}...`
-                : "no spreadsheet_id";
+                : "Не указана таблица";
         case "google_calendar_create_event":
-            return config.summary || "no summary";
+            return config.summary || "Не заполнено название события";
         default:
             return "";
     }
@@ -228,7 +281,7 @@ export default function CanvasNode({ id, type, data, selected }: NodeProps) {
     const config = (data?.config as Record<string, any>) || {};
     const text = preview(type as string, config);
     const isTrigger =
-        type === "manual" || type === "schedule" || type === "telegram_trigger" || type === "webhook";
+        type === "manual" || type === "schedule" || type === "telegram_trigger" || type === "webhook" || type === "email_trigger";
     const isAgent = type === "agent";
     const runState = useContext(RunProgressContext)?.[id];
     const badge = runState ? RUN_BADGE[runState.status] : null;
@@ -264,18 +317,18 @@ export default function CanvasNode({ id, type, data, selected }: NodeProps) {
                 />
             )}
 
-            <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-100">
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-100 min-w-0">
                 <span
                     className={`w-7 h-7 shrink-0 rounded-lg flex items-center justify-center ${meta.badge}`}
                 >
                     <Icon className="w-4 h-4" />
                 </span>
-                <span className="shrink-0 whitespace-nowrap text-sm font-semibold text-gray-800">
+                <span className="shrink-0 whitespace-nowrap text-sm font-semibold text-gray-800 max-w-[55%] truncate" title={meta.label}>
                     {meta.label}
                 </span>
                 <span
                     title={id}
-                    className="ml-auto min-w-0 truncate text-[10px] font-mono text-gray-400"
+                    className="ml-auto min-w-0 max-w-[40%] truncate text-[10px] font-mono text-gray-400 pr-0.5"
                 >
                     {id}
                 </span>
@@ -339,7 +392,7 @@ export default function CanvasNode({ id, type, data, selected }: NodeProps) {
             )}
             {isAgent && (
                 <div className="absolute -bottom-5 left-0 right-0 text-center text-[10px] text-indigo-500 font-medium">
-                    ↓ инструменты
+                    ↓ инструменты агента
                 </div>
             )}
         </div>

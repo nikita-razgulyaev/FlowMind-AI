@@ -1,18 +1,21 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Workflow, History, FileText, Plug, Settings, UserCircle, ShieldCheck, LogOut, CreditCard, Info } from "lucide-react";
+import { useState } from "react";
+import { GraduationCap, Workflow, History, FileText, Plug, Settings, UserCircle, ShieldCheck, LogOut, CreditCard, Info } from "lucide-react";
 import { useAuth } from "../../store/auth";
+import TutorialModal from "../tutorial/TutorialModal";
 
 const ITEMS: { to: string; icon: typeof Workflow; title: string }[] = [
-    { to: "/", icon: Workflow, title: "Воркфлоу" },
-    { to: "/executions", icon: History, title: "История" },
-    { to: "/templates", icon: FileText, title: "Шаблоны" },
-    { to: "/connections", icon: Plug, title: "Подключения" },
+    { to: "/", icon: Workflow, title: "Мои сценарии" },
+    { to: "/executions", icon: History, title: "История запусков" },
+    { to: "/templates", icon: FileText, title: "Готовые шаблоны" },
+    { to: "/connections", icon: Plug, title: "Подключения (Telegram, почта, Google)" },
 ];
 
 export default function EditorSidebar() {
     const location = useLocation();
     const navigate = useNavigate();
     const { config, me, logout } = useAuth();
+    const [tutorialOpen, setTutorialOpen] = useState(false);
     const showAccount = !!config?.auth_required;
     const isAdmin = me?.user.role === "admin" && showAccount;
 
@@ -29,6 +32,14 @@ export default function EditorSidebar() {
                 </Link>
             ))}
             <div className="flex-1" />
+            <button
+                className={linkClass(tutorialOpen)}
+                title="Обучение: как собрать сценарий. Там же можно открыть новый сценарий с пошаговой подсказкой"
+                aria-label="Обучение"
+                onClick={() => setTutorialOpen(true)}
+            >
+                <GraduationCap className="w-[18px] h-[18px]" />
+            </button>
             {showAccount && (
                 <>
                     <Link to="/pricing" className={linkClass(location.pathname === "/pricing")} title="Тарифы">
@@ -64,6 +75,15 @@ export default function EditorSidebar() {
                     <LogOut className="w-[18px] h-[18px]" />
                 </button>
             )}
+            <TutorialModal
+                open={tutorialOpen}
+                mode="tour"
+                onClose={() => setTutorialOpen(false)}
+                onStartInteractive={() => {
+                    setTutorialOpen(false);
+                    navigate("/workflow/new?tour=1");
+                }}
+            />
         </aside>
     );
 }

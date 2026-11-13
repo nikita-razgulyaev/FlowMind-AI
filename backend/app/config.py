@@ -1,6 +1,8 @@
 """Единая конфигурация сервиса. Все параметры берутся из переменных окружения / .env."""
 from __future__ import annotations
 
+import json
+import logging
 import os
 from functools import lru_cache
 from typing import Optional
@@ -27,6 +29,26 @@ def normalize_database_url(raw: str) -> tuple[URL, dict]:
             connect_args["ssl"] = sslmode
         url = url.set(query=query)
     return url, connect_args
+
+
+# Основная модель по умолчанию: OrcaRouter, бесплатная DeepSeek V4 Flash (контекст 1M, вызов инструментов, JSON). Ключ берётся из ORCAROUTER_API_KEY.
+DEFAULT_PLATFORM_LLM_PROVIDERS = [
+    {"name": "orcarouter", "base_url": "https://api.orcarouter.ai/v1", "model": "deepseek/deepseek-v4-flash-free", "api_key_env": "ORCAROUTER_API_KEY"},
+]
+
+
+@lru_cache
+def _dotenv() -> dict:
+    try:
+        from dotenv import dotenv_values
+        return {k: v for k, v in dotenv_values(".env").items() if v}
+    except Exception:
+        return {}
+
+
+def _env_value(name: str) -> str:
+    """Секрет по имени переменной: из окружения сервера или из файла .env."""
+    return (os.environ.get(name) or _dotenv().get(name) or "") if name else ""
 
 
 class Settings(BaseSettings):
@@ -75,15 +97,12 @@ class Settings(BaseSettings):
     llm_mode: str = ""                        # local | cloud; по умолчанию зависит от deployment_mode
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5"
-    platform_llm_base_url: str = "https://router.huggingface.co/v1"
-    platform_llm_api_key: str = Field(
-        default="", validation_alias=AliasChoices("PLATFORM_LLM_API_KEY", "HF_TOKEN")
-    )
-    platform_llm_model: str = Field(
-        default="openai/gpt-oss-120b:groq",
-        validation_alias=AliasChoices("PLATFORM_LLM_MODEL", "HF_MODEL"),
-    )
+    # Все модели встроенного AI одним списком, первая — основная, остальные запасные (переключение при сбое).
+    # JSON: [{"name": "...", "base_url": "https://.../v1", "model": "...", "api_key_env": "ИМЯ_ПЕРЕМЕННОЙ"}], вместо api_key_env можно указать api_key.
+    # Если список не задан, используется модель по умолчанию (DEFAULT_PLATFORM_LLM_PROVIDERS) с ключом из ORCAROUTER_API_KEY.
+    platform_llm_providers_raw: str = Field(default="", validation_alias=AliasChoices("PLATFORM_LLM_PROVIDERS"))
     ai_daily_cap: int = 5000                  # общий суточный потолок запросов к ключу платформы
+    platform_llm_cooldown_seconds: int = 60   # на сколько отложить провайдера после сбоя (при повторных сбоях растёт, максимум 10 минут)
 
     # --- Telegram ---
     telegram_mode: str = "auto"               # auto | webhook | polling | off
@@ -94,6 +113,15 @@ class Settings(BaseSettings):
     google_redirect_uri: str = ""
     google_auth_url: str = "https://accounts.google.com/o/oauth2/v2/auth"
     google_token_url: str = "https://oauth2.googleapis.com/token"
+
+    # --- Яндекс / Mail.ru OAuth ---
+    yandex_client_id: str = ""
+    yandex_client_secret: str = ""
+    yandex_redirect_uri: str = ""
+    mailru_client_id: str = ""
+    mailru_client_secret: str = ""
+    mailru_redirect_uri: str = ""
+    mailru_mail_scopes: str = "userinfo mail.imap"   # права для почты Mail.ru; уточняйте в кабинете o2.mail.ru
 
     # --- лимиты безопасности исполнения ---
     max_execution_seconds: int = 120
@@ -147,6 +175,38 @@ class Settings(BaseSettings):
         if self.google_redirect_uri:
             return self.google_redirect_uri
         return f"{self.base_url or 'http://localhost:8000'}/api/oauth/google/callback"
+
+    @property
+    def platform_llm_providers(self) -> list[dict]:
+        """Цепочка моделей встроенного AI по порядку: первая основная, дальше запасные. Записи без ключа или с адресом не по https пропускаются."""
+        raw = (self.platform_llm_providers_raw or "").strip()
+        items = DEFAULT_PLATFORM_LLM_PROVIDERS
+        if raw:
+            try:
+                items = json.loads(raw)
+            except ValueError:
+                logging.getLogger(__name__).warning("PLATFORM_LLM_PROVIDERS: некорректный JSON, используется список по умолчанию")
+        chain = []
+        for i, item in enumerate(items if isinstance(items, list) else []):
+            if not isinstance(item, dict) or not all(isinstance(item.get(k), str) and item.get(k) for k in ("base_url", "model")):
+                continue
+            key = item.get("api_key") or _env_value(item.get("api_key_env", ""))
+            if not key or not item["base_url"].startswith("https://"):
+                continue
+            chain.append({"name": str(item.get("name") or f"model{i + 1}")[:40], "base_url": item["base_url"], "api_key": key,
+                          "model": item["model"], "max_tokens": int(item.get("max_tokens") or 1500)})
+        return chain
+
+    @property
+    def platform_llm_configured(self) -> bool:
+        return bool(self.platform_llm_providers)
+
+    def oauth_redirect(self, family: str) -> str:
+        """Адрес возврата для OAuth-входа; его нужно указать в кабинете разработчика соответствующего сервиса."""
+        if family == "google":
+            return self.google_redirect
+        override = getattr(self, f"{family}_redirect_uri", "")
+        return override or f"{self.base_url or 'http://localhost:8000'}/api/oauth/{family}/callback"
 
     @property
     def app_url(self) -> str:

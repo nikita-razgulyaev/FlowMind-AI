@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import httpx
 
 from .config import settings
+from .services import caldav, email_service, oauth, textops
 from .services.llm import LLMProvider
 from .services.safe_eval import safe_eval
 from .services.ssrf import assert_public_url
@@ -15,8 +16,8 @@ from .services.ssrf import assert_public_url
 MAX_HTTP_REDIRECTS = 3
 MAX_RENDER_CHARS = 20000                    # длина одного подставляемого значения {node}
 MAX_HTTP_JSON_CHARS = 20000                 # ответ HTTP разбирается в json, только если он не больше
-TRIGGER_TYPES = ("manual", "telegram_trigger", "webhook", "schedule")
-BRANCH_TRIGGER_KEYS = ("telegram", "webhook", "schedule")     # признаки «боевого» запуска (не кнопка Run)
+TRIGGER_TYPES = ("manual", "telegram_trigger", "webhook", "schedule", "email_trigger")
+BRANCH_TRIGGER_KEYS = ("telegram", "webhook", "schedule", "email")     # признаки «боевого» запуска (не кнопка Run)
 
 # {name}, {name.field}, {name.items[0].title} — путь по JSON-выводу ноды
 PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][\w\-]*)((?:\.[\w\-]+|\[\d+\])*)\}")
@@ -69,6 +70,39 @@ ERROR_OUTPUT_RE = re.compile(r"^[A-Za-z ]{2,30} Error\b")
 def is_error_output(result) -> bool:
     """Обработчики нод возвращают сбой строкой «LLM Error: ...», «HTTP Error: ...» — помечаем такую ноду как failed."""
     return isinstance(result, str) and bool(ERROR_OUTPUT_RE.match(result))
+
+
+def telegram_error_hint(body: str) -> str:
+    """Понятное объяснение типичных отказов Telegram."""
+    low = body.lower()
+    if "chat not found" in low:
+        return "чат или канал не найден. Для канала укажите @имя_канала и добавьте бота администратором"
+    if "not enough rights" in low or "have no rights" in low or "need administrator" in low:
+        return "у бота нет прав публиковать в этом канале. Назначьте его администратором с правом публикации сообщений"
+    if "bot was blocked" in low or "bot was kicked" in low:
+        return "бот заблокирован пользователем или удалён из чата"
+    if "wrong file identifier" in low or "failed to get http url content" in low or "wrong type of the web page content" in low:
+        return "Telegram не смог скачать картинку по ссылке. Нужна прямая ссылка на изображение, открытая без входа"
+    return body[:200]
+
+
+def prepare_tool_schema(schema) -> dict:
+    """Схема параметров инструмента для модели. Примеры значений (`examples`) переносятся в описание поля:
+    так их видят все провайдеры, и модель понимает, как искать значение в сообщении клиента."""
+    if not isinstance(schema, dict) or not isinstance(schema.get("properties"), dict):
+        return {"type": "object", "properties": {}, "required": []}
+    props = {}
+    for name, prop in schema["properties"].items():
+        if not isinstance(prop, dict):
+            props[name] = {"type": "string"}
+            continue
+        prop = dict(prop)
+        examples = prop.pop("examples", None)
+        if isinstance(examples, list) and examples:
+            sample = "; ".join(f"«{e}»" for e in examples[:5])
+            prop["description"] = f"{prop.get('description', '')} Примеры в сообщениях клиентов: {sample}".strip()
+        props[name] = prop
+    return {**schema, "properties": props, "required": [r for r in schema.get("required", []) if r in props]}
 
 
 def normalize_label(text: str) -> str:
@@ -145,6 +179,14 @@ class WorkflowEngine:
             self.context["telegram_username"] = tg.get("username", "")
             self.context["telegram_first_name"] = tg.get("first_name", "")
 
+        mail = trigger_data.get("email") if isinstance(trigger_data, dict) else None
+        if isinstance(mail, dict):
+            self.context["email_from"] = mail.get("from", "")
+            self.context["email_from_name"] = mail.get("from_name", "")
+            self.context["email_subject"] = mail.get("subject", "")
+            self.context["email_body"] = mail.get("body", "")
+            self.context["email_message_id"] = mail.get("message_id", "")
+
         webhook = trigger_data.get("webhook") if isinstance(trigger_data, dict) else None
         if isinstance(webhook, dict):
             self.context["webhook"] = webhook
@@ -210,6 +252,10 @@ class WorkflowEngine:
             if node["type"] == "telegram_trigger":
                 self.context["telegram_text"] = text
                 self.context["telegram_chat_id"] = cfg.get("test_chat_id", "")
+            if node["type"] == "email_trigger":
+                self.context["email_from"] = cfg.get("test_from", "client@example.com")
+                self.context["email_subject"] = cfg.get("test_subject", "")
+                self.context["email_body"] = text
             if node["type"] == "webhook":
                 self.context["webhook"] = {"body": loose_json(text) or text, "query": {}, "method": "POST"}
             return
@@ -239,6 +285,9 @@ class WorkflowEngine:
             "telegram_trigger": self._handle_manual,
             "webhook": self._handle_manual,
             "schedule": self._handle_manual,
+            "email_trigger": self._handle_manual,
+            "text_transform": self._handle_text_transform,
+            "email_send": self._handle_email_send,
             "text_input": self._handle_text_input,
             "switch": self._handle_switch,
             "set": self._handle_set,
@@ -268,6 +317,36 @@ class WorkflowEngine:
     async def _handle_text_input(self, config, td, extra_vars=None):
         """Готовый текст (вставленный или из файла) — как есть, без подстановок."""
         return str(config.get("text", ""))
+
+    async def _handle_text_transform(self, config, td, extra_vars=None):
+        """Обработка текста без нейросети: найти email/телефон/номер заказа/дату, очистить, обрезать."""
+        value = self._render_template(config.get("value") or "{input}", extra_vars)
+        return textops.apply_operation(
+            config.get("operation") or "trim", value, str(config.get("pattern", "")), config.get("max_chars") or 500,
+        )
+
+    async def _handle_email_send(self, config, td, extra_vars=None):
+        connection = self._get_connection(config.get("connection_id"))
+        if not connection or connection.get("provider") not in oauth.MAIL_PROVIDERS:
+            return "Email Error: не выбрана почта. Подключите её в разделе «Подключения»"
+        if connection["config"].get("needs_reauth"):
+            return "Email Error: доступ к почте истёк. Откройте «Подключения» и войдите заново"
+        to = self._render_template(config.get("to") or "{email_from}", extra_vars).strip()
+        if not textops.EMAIL_RE.fullmatch(to):
+            return f"Email Error: некорректный адрес получателя «{to}»"
+        subject = self._render_template(config.get("subject", ""), extra_vars)[:300] or "Без темы"
+        body = self._render_template(config.get("body", ""), extra_vars)
+        reply_id = self.context.get("email_message_id", "") if config.get("as_reply") else ""
+        try:
+            await email_service.send_message(email_service.with_provider(connection), to, subject, body, reply_id)
+        except Exception as e:
+            secrets_ = [str(connection["config"].get(k, "")) for k in ("password", "access_token")]
+            message = str(e)
+            for secret in secrets_:
+                if secret:
+                    message = message.replace(secret, "***")
+            return f"Email Error: {message}"
+        return {"status": "sent", "to": to, "subject": subject}
 
     async def _handle_switch(self, config, td, extra_vars=None):
         """Выбирает ветку: совпадение значения с одним из cases (точное, затем по вхождению), иначе «default»."""
@@ -352,33 +431,54 @@ class WorkflowEngine:
         if not chat_id:
             return "Telegram Error: не указан chat_id"
 
+        photo_url = self._render_template(str(config.get("photo_url", "") or ""), extra_vars).strip()
+        if chat_id.startswith("https://t.me/"):
+            chat_id = "@" + chat_id.rstrip("/").rsplit("/", 1)[-1]        # ссылка на публичный канал → @имя
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                    json={"chat_id": chat_id, "text": text[:4096]},
-                )
+                if photo_url:
+                    try:
+                        await assert_public_url(photo_url)
+                    except ValueError as e:
+                        return f"Telegram Error: картинка: {e}"
+                    caption = text[:1024] if len(text) <= 1024 else ""
+                    response = await client.post(f"https://api.telegram.org/bot{bot_token}/sendPhoto",
+                                                 json={"chat_id": chat_id, "photo": photo_url, "caption": caption})
+                    if response.status_code == 200 and not caption and text:       # длинный текст уходит отдельным сообщением
+                        response = await client.post(f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                                                     json={"chat_id": chat_id, "text": text[:4096]})
+                else:
+                    response = await client.post(f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                                                 json={"chat_id": chat_id, "text": text[:4096]})
+                if response.status_code in (400, 403):
+                    return f"Telegram Error: {telegram_error_hint(response.text)}"
                 return {"status_code": response.status_code, "body": response.text[:500]}
         except Exception as e:
             return f"Telegram Error: {str(e).replace(bot_token, '***')}"
 
     async def _handle_google_sheets_append(self, config, td, extra_vars=None):
         connection = self._get_connection(config.get("connection_id"))
-        if not connection or connection.get("provider") != "google_sheets":
-            return "Google Sheets Error: не выбрано подключение Google Таблицы (Подключения → Инструменты)"
+        provider = (connection or {}).get("provider")
+        if provider not in ("google_sheets", "yandex_sheets"):
+            return "Sheets Error: не выбрано подключение таблиц (Подключения → Таблицы: Google или Яндекс)"
+        if connection["config"].get("needs_reauth"):
+            return "Sheets Error: доступ к таблицам истёк или отозван. Откройте «Подключения» и войдите заново"
 
         access_token = connection["config"].get("access_token")
         if not access_token:
-            return "Google Sheets Error: нет access_token — переподключи аккаунт на странице Подключения"
+            return "Sheets Error: нет access_token — переподключите аккаунт на странице Подключения"
 
         spreadsheet_id = self._render_template(config.get("spreadsheet_id", ""), extra_vars)
-        sheet_range = config.get("range", "A1")
         raw_values = self._render_template(config.get("values", ""), extra_vars)
         row = [v.strip() for v in raw_values.split(",")] if raw_values else []
 
         if not spreadsheet_id:
-            return "Google Sheets Error: не указан spreadsheet_id"
+            return "Sheets Error: не указан ID таблицы (Google) или путь к файлу на Диске (Яндекс)"
 
+        if provider == "yandex_sheets":
+            return await self._yandex_disk_csv_append(access_token, spreadsheet_id, row)
+
+        sheet_range = config.get("range", "A1")
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
@@ -391,39 +491,101 @@ class WorkflowEngine:
         except Exception as e:
             return f"Google Sheets Error: {str(e)}"
 
+    async def _yandex_disk_csv_append(self, access_token: str, path: str, row: list):
+        """Добавить строку в CSV на Яндекс Диске (скачать → дописать → загрузить обратно)."""
+        import csv
+        import io
+
+        path = path.strip()
+        if not path.startswith("disk:"):
+            path = "disk:/" + path.lstrip("/")
+        headers = {"Authorization": f"OAuth {access_token}"}
+        try:
+            async with httpx.AsyncClient(timeout=45.0) as client:
+                meta = await client.get(
+                    "https://cloud-api.yandex.net/v1/disk/resources/download",
+                    params={"path": path},
+                    headers=headers,
+                )
+                if meta.status_code == 404:
+                    content = ""
+                elif meta.status_code != 200:
+                    return f"Yandex Tables Error: не удалось получить файл ({meta.status_code}): {meta.text[:200]}"
+                else:
+                    href = meta.json().get("href")
+                    if not href:
+                        return "Yandex Tables Error: нет ссылки на скачивание"
+                    dl = await client.get(href)
+                    if dl.status_code != 200:
+                        return f"Yandex Tables Error: скачивание не удалось ({dl.status_code})"
+                    content = dl.text
+
+                buf = io.StringIO()
+                if content and not content.endswith("\n"):
+                    content += "\n"
+                buf.write(content)
+                writer = csv.writer(buf)
+                writer.writerow(row)
+                new_body = buf.getvalue().encode("utf-8")
+
+                up = await client.get(
+                    "https://cloud-api.yandex.net/v1/disk/resources/upload",
+                    params={"path": path, "overwrite": "true"},
+                    headers=headers,
+                )
+                if up.status_code != 200:
+                    return f"Yandex Tables Error: не удалось получить ссылку загрузки ({up.status_code}): {up.text[:200]}"
+                upload_href = up.json().get("href")
+                if not upload_href:
+                    return "Yandex Tables Error: нет ссылки на загрузку"
+
+                put = await client.put(upload_href, content=new_body)
+                if put.status_code not in (201, 202):
+                    return f"Yandex Tables Error: загрузка не удалась ({put.status_code}): {put.text[:200]}"
+                return {"status_code": put.status_code, "path": path, "rows_appended": 1}
+        except Exception as e:
+            return f"Yandex Tables Error: {str(e)}"
+
     async def _handle_google_calendar_create_event(self, config, td, extra_vars=None):
+        """Событие в календаре: Google (OAuth) или Яндекс (CalDAV). Тип шага один, сервис определяется выбранным подключением."""
         connection = self._get_connection(config.get("connection_id"))
-        if not connection or connection.get("provider") != "google_calendar":
-            return "Google Calendar Error: не выбрано подключение Google Календарь (Подключения → Инструменты)"
-
-        access_token = connection["config"].get("access_token")
-        if not access_token:
-            return "Google Calendar Error: нет access_token — переподключи аккаунт на странице Подключения"
-
-        calendar_id = config.get("calendar_id") or "primary"
+        provider = (connection or {}).get("provider")
+        if provider not in ("google_calendar", "yandex_calendar"):
+            return "Calendar Error: не выбрано подключение календаря. Подключите Google или Яндекс в разделе «Подключения»"
         summary = self._render_template(config.get("summary", ""), extra_vars)
         description = self._render_template(config.get("description", ""), extra_vars)
         start_dt = self._render_template(config.get("start_datetime", ""), extra_vars)
         end_dt = self._render_template(config.get("end_datetime", ""), extra_vars)
-
         if not (start_dt and end_dt):
-            return "Google Calendar Error: не указаны start_datetime/end_datetime"
+            return "Calendar Error: не указаны начало и конец события"
 
+        if provider == "yandex_calendar":
+            cfg = connection["config"]
+            try:
+                name = self._render_template(str(config.get("calendar_id", "") or ""), extra_vars).strip()
+                return await caldav.create_event(cfg.get("email", ""), cfg.get("password", ""), summary, description, start_dt, end_dt,
+                                                 "" if name.lower() == "primary" else name)
+            except caldav.CalDAVError as e:
+                return f"Calendar Error: {e}"
+            except Exception:
+                return "Calendar Error: не удалось связаться с Яндекс Календарём, повторите попытку"
+
+        if connection["config"].get("needs_reauth"):
+            return "Calendar Error: доступ к Google истёк или отозван. Откройте «Подключения» и войдите заново"
+        access_token = connection["config"].get("access_token")
+        if not access_token:
+            return "Calendar Error: нет доступа к Google. Переподключите аккаунт в разделе «Подключения»"
+        calendar_id = config.get("calendar_id") or "primary"
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
                     f"https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events",
                     headers={"Authorization": f"Bearer {access_token}"},
-                    json={
-                        "summary": summary,
-                        "description": description,
-                        "start": {"dateTime": start_dt},
-                        "end": {"dateTime": end_dt},
-                    },
+                    json={"summary": summary, "description": description, "start": {"dateTime": start_dt}, "end": {"dateTime": end_dt}},
                 )
                 return {"status_code": response.status_code, "body": response.text[:500]}
         except Exception as e:
-            return f"Google Calendar Error: {str(e)}"
+            return f"Calendar Error: {str(e)}"
 
     async def _handle_condition(self, config, td, extra_vars=None):
         expression = self._render_template(config.get("expression", "True"), extra_vars)
@@ -474,7 +636,7 @@ class WorkflowEngine:
                 "function": {
                     "name": tool_name,
                     "description": tconf.get("tool_description", f"Инструмент {tool_name}"),
-                    "parameters": tconf.get("tool_parameters", {"type": "object", "properties": {}, "required": []}),
+                    "parameters": prepare_tool_schema(tconf.get("tool_parameters")),
                 },
             })
 

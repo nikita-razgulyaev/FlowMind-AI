@@ -159,7 +159,7 @@ docker compose up --build
 
 ```env
 OLLAMA_MODEL=qwen2.5            # любая модель Ollama с поддержкой tool calling
-PLATFORM_LLM_API_KEY=hf_...      # если хотите ещё и облачные ноды без своего подключения
+ORCAROUTER_API_KEY=...          # основная модель встроенного AI (OrcaRouter, DeepSeek V4 Flash)
 GOOGLE_CLIENT_ID=...             # для Google Таблиц/Календаря
 GOOGLE_CLIENT_SECRET=...
 ```
@@ -192,7 +192,7 @@ GOOGLE_CLIENT_SECRET=...
    Приложение: <http://localhost:5173> (запросы `/api/*` проксируются на backend).
 
 ### Что нужно знать о локальном режиме
-- В нодах LLM/Agent режим **Local** использует Ollama (`OLLAMA_URL`, `OLLAMA_MODEL`), режим **Cloud** — свои подключения либо ключ из `PLATFORM_LLM_API_KEY`.
+- В нодах LLM/Agent режим **Local** использует Ollama (`OLLAMA_URL`, `OLLAMA_MODEL`), режим **Cloud** — свои подключения либо модели платформы (`ORCAROUTER_API_KEY`, `PLATFORM_LLM_PROVIDERS`).
 - Шаблоны при создании автоматически переключаются на Ollama.
 - Telegram-триггер работает через long polling: публичный адрес не нужен. Сообщения, присланные боту, пока сервис был выключен, пропускаются.
 - Включить вход и в локальной версии можно переменными `AUTH_ENABLED=true` (например, для домашнего сервера в сети) — тогда работает обычная регистрация.
@@ -210,7 +210,7 @@ GOOGLE_CLIENT_SECRET=...
 2. Render → **New → Blueprint** → выберите репозиторий — подхватится `render.yaml` (веб-сервис в Docker + PostgreSQL).
 3. Render спросит значения секретных переменных:
    - `ADMIN_EMAIL`, `ADMIN_PASSWORD` — ваш администратор (домен email должен быть настоящим, например `example.com`; зарезервированные `.test`/`.local` не подойдут);
-   - `PLATFORM_LLM_API_KEY` — токен Hugging Face для AI сервиса;
+   - `ORCAROUTER_API_KEY` — ключ основной модели AI сервиса (при необходимости `PLATFORM_LLM_PROVIDERS` — полный список моделей);
    - `SECRET_KEY` и `ENCRYPTION_KEY` сгенерируются автоматически.
 4. Адрес сервиса (`https://….onrender.com`) подставляется автоматически: он нужен для вебхуков Telegram и возврата с оплаты.
 
@@ -234,7 +234,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
 - [ ] `DEMO_MODE=false`.
 - [ ] Настроен SMTP (`SMTP_*`) и при желании `REQUIRE_EMAIL_VERIFICATION=true`.
 - [ ] `PAYMENT_PROVIDER=yookassa` и заполнены ключи ЮKassa ([инструкция](#подключение-реальной-оплаты-юkassa)).
-- [ ] Задан `PLATFORM_LLM_API_KEY` и проверена модель с tool calling; в админ-панели выставлен суточный потолок.
+- [ ] Задан `ORCAROUTER_API_KEY` (или `PLATFORM_LLM_PROVIDERS`) и проверена модель с tool calling; в админ-панели выставлен суточный потолок.
 - [ ] Сервис запущен **одним инстансом** (см. [ограничения](#ограничения)).
 
 ---
@@ -271,7 +271,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
 | Telegram Bot | Bot Token | [@BotFather](https://t.me/BotFather) |
 | Google Таблицы / Календарь | Вход через Google (OAuth2) | требует настройки в Google Cloud Console |
 
-**AI сервиса.** Если в ноде не выбрано своё подключение (режим Cloud), используется ключ платформы: `PLATFORM_LLM_API_KEY` с базовым адресом `PLATFORM_LLM_BASE_URL` (по умолчанию роутер Hugging Face Inference Providers, OpenAI-совместимый). Модель задаёт `PLATFORM_LLM_MODEL` — она должна поддерживать tool calling; выберите подходящую в списке моделей роутера. Ключ платформы защищён: общий суточный потолок запросов и рубильник «AI выключен» в админ-панели, ограничение длины ответа. Бесплатные квоты провайдера ограничены — следите за расходом и условиями провайдера.
+**AI сервиса.** Если в шаге не выбрано своё подключение (режим Cloud), используются модели платформы. Они заданы **одним списком** `PLATFORM_LLM_PROVIDERS` (JSON): первая модель основная, остальные запасные. Если список не задан, основной служит `deepseek/deepseek-v4-flash-free` на OrcaRouter (`https://api.orcarouter.ai/v1`) с ключом из `ORCAROUTER_API_KEY`. У каждой записи есть `name`, `base_url` (только https, OpenAI-совместимый API), `model` (с поддержкой tool calling), ключ в `api_key_env` (имя переменной) или `api_key`. Ключ платформы защищён: общий суточный потолок запросов, рубильник «AI выключен» в админ-панели, ограничение длины ответа. Бесплатные квоты ограничены — следите за условиями провайдеров.
 
 **Google OAuth (Таблицы и Календарь)**
 1. [console.cloud.google.com](https://console.cloud.google.com) → создайте проект.
@@ -326,9 +326,12 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
 | `DEMO_MODE` | показывать ссылки из писем в ответе API и `/api/docs` — только для демо |
 | `PAYMENT_PROVIDER`, `YOOKASSA_*` | оплата |
 | `OLLAMA_URL`, `OLLAMA_MODEL` | локальные модели |
-| `PLATFORM_LLM_BASE_URL`, `PLATFORM_LLM_API_KEY`, `PLATFORM_LLM_MODEL`, `AI_DAILY_CAP` | AI сервиса |
+| `ORCAROUTER_API_KEY`, `PLATFORM_LLM_PROVIDERS`, `AI_DAILY_CAP` | AI сервиса |
 | `TELEGRAM_MODE` | `auto` / `webhook` / `polling` / `off` |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` | Google OAuth |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` | Google OAuth: Таблицы, Календарь, Gmail |
+| `YANDEX_CLIENT_ID`, `YANDEX_CLIENT_SECRET` | Яндекс Почта через OAuth (XOAUTH2) |
+| `PLATFORM_LLM_COOLDOWN_SECONDS` | Пауза после сбоя модели перед следующей попыткой (сек.) |
+| `MAILRU_CLIENT_ID`, `MAILRU_CLIENT_SECRET`, `MAILRU_MAIL_SCOPES` | Почта Mail.ru через OAuth; права для почты уточните в кабинете разработчика |
 | `AUTO_MIGRATE` | применять миграции Alembic при старте |
 
 Совместимость со старыми `.env`: `LLM_MODE`, `HF_TOKEN` (= `PLATFORM_LLM_API_KEY`), `HF_MODEL` (= `PLATFORM_LLM_MODEL`) по-прежнему читаются. Если у вас стояла модель Hugging Face старого формата, убедитесь, что она доступна через роутер и поддерживает tool calling.
@@ -395,3 +398,21 @@ FlowMind-AI/
 ├── .env.prod.example
 └── docs/
 ```
+
+
+## Вход в сервисы через OAuth
+
+Подключения создаются входом в аккаунт сервиса, пароли не вводятся. Токены хранятся зашифрованными, обновляются автоматически, при отзыве доступа подключение помечается «Нужен повторный вход». Для Google включён PKCE и проверка, что пользователь не снял нужные галочки на экране согласия. При удалении подключения доступ Google отзывается.
+
+| Сервис | Что даёт | Что нужно сделать администратору |
+|---|---|---|
+| Google | Таблицы, Календарь, Gmail (почта) | Создать OAuth-клиент, указать адрес возврата `<BASE_URL>/api/oauth/google/callback`. Для Gmail Google требует проверку приложения |
+| Яндекс | Чтение и отправка почты | Создать приложение на oauth.yandex.ru с правами `mail:imap_ro`, `mail:smtp`, `login:email` |
+| Mail.ru | Чтение и отправка почты | Создать приложение на o2.mail.ru; состав прав для почты настраивается `MAILRU_MAIL_SCOPES` (проверьте по документации Mail.ru) |
+| Яндекс Календарь | Создание событий по CalDAV | Ключи не нужны: пользователь вводит логин и пароль приложения для типа «Календарь» (проверено только на тестовых ответах сервера, на реальном Яндексе не пробовалось) |
+| Telegram | Бот: токен из @BotFather | Токен проверяется при подключении; для канала добавьте бота администратором |
+
+
+## Автопереключение встроенной модели AI
+
+Встроенный AI работает по цепочке: основная модель (первая в `PLATFORM_LLM_PROVIDERS`), затем остальные по порядку. Переключение происходит при сбое на стороне провайдера: недоступность сервера, таймаут, ответы 5xx, 429 (лимит), 401/402/403 (ключ или оплата), 404 и нечитаемый ответ. Ошибки самого запроса (400, 413, 422) не переключаются: другая модель их не исправит. Упавший провайдер откладывается на `PLATFORM_LLM_COOLDOWN_SECONDS` (при повторных сбоях пауза растёт до 10 минут), чтобы следующие запросы не ждали его таймаут. Суточный лимит запросов считается один раз на запрос, а не на попытку. Подключения пользователей (его собственный ключ) не переключаются на модели платформы. В админ-панели показано число запасных моделей.

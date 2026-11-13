@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Bot, CalendarPlus, Cloud, HardDrive, MessageCircle, Send, Sparkles, Table, Workflow } from "lucide-react";
+import { Bot, Cloud, HardDrive, MessageCircle, Sparkles, Table, Workflow } from "lucide-react";
+import { NODE_META } from "../components/canvas/CanvasNode";
 import { api } from "../api/client";
 import { useAuth } from "../store/auth";
 import type { Plan } from "../types/app";
@@ -21,20 +22,56 @@ const FEATURES = [
 
 const FAQ_KEYS = ["free", "ownKeys", "local", "payment", "cancel"] as const;
 
+const SCHEME_W = 576;
+const SCHEME_H = 288;
+const NODE_H = 44;
+
+/** Схема: Почта → ИИ-агент → три ветки: нейросеть → отправить письмо, таблица, календарь. Масштабируется под ширину экрана. */
 function FlowIllustration() {
-    const box = "absolute w-40 rounded-xl border-2 bg-white shadow-md px-3 py-2 flex items-center gap-2 text-sm font-semibold";
+    const wrapRef = useRef<HTMLDivElement>(null);
+    const [scale, setScale] = useState(1);
+    useLayoutEffect(() => {
+        const update = () => setScale(Math.min(1, (wrapRef.current?.clientWidth ?? SCHEME_W) / SCHEME_W));
+        update();
+        window.addEventListener("resize", update);
+        return () => window.removeEventListener("resize", update);
+    }, []);
+
+    const node = (type: string, name: string, x: number, y: number, w: number) => {
+        const meta = NODE_META[type];
+        const Icon = meta.icon;
+        return (
+            <div
+                key={name}
+                className={`absolute flex items-center gap-2 rounded-xl border-2 bg-white px-3 shadow-md min-w-0 overflow-hidden ${meta.ring}`}
+                style={{ left: x, top: y, width: w, height: NODE_H }}
+            >
+                <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${meta.badge}`}>
+                    <Icon className="h-4 w-4" />
+                </span>
+                <span className="truncate text-[13px] font-semibold" title={name}>{name}</span>
+            </div>
+        );
+    };
+    const line = (d: string) => <path key={d} d={d} stroke="#3b82f6" strokeWidth="2" fill="none" />;
+
     return (
-        <div className="relative w-full max-w-xl h-72 mx-auto" aria-hidden="true">
-            <svg className="absolute inset-0 w-full h-full" viewBox="0 0 560 288" fill="none">
-                <path d="M170 56 C 200 56, 190 110, 220 110" stroke="#3b82f6" strokeWidth="2" />
-                <path d="M380 110 C 410 110, 400 56, 430 56" stroke="#3b82f6" strokeWidth="2" />
-                <path d="M300 140 C 300 175, 300 190, 300 220" stroke="#6366f1" strokeWidth="2" strokeDasharray="5 4" />
-            </svg>
-            <div className={`${box} border-cyan-200 left-0 top-4`}><span className="w-7 h-7 rounded-lg bg-cyan-100 text-cyan-700 flex items-center justify-center"><MessageCircle className="w-4 h-4" /></span>Telegram</div>
-            <div className={`${box} border-indigo-300 left-[40%] top-[76px]`}><span className="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center"><Bot className="w-4 h-4" /></span>AI-агент</div>
-            <div className={`${box} border-sky-200 right-0 top-4`}><span className="w-7 h-7 rounded-lg bg-sky-100 text-sky-700 flex items-center justify-center"><Send className="w-4 h-4" /></span>Ответ</div>
-            <div className={`${box} border-green-200 left-[40%] top-[220px]`}><span className="w-7 h-7 rounded-lg bg-green-100 text-green-700 flex items-center justify-center"><Table className="w-4 h-4" /></span>Sheets</div>
-            <div className={`${box} border-red-200 left-0 top-[220px]`}><span className="w-7 h-7 rounded-lg bg-red-100 text-red-700 flex items-center justify-center"><CalendarPlus className="w-4 h-4" /></span>Calendar</div>
+        <div ref={wrapRef} className="mx-auto w-full max-w-xl" style={{ height: SCHEME_H * scale }} aria-hidden="true">
+            <div className="relative origin-top-left" style={{ width: SCHEME_W, height: SCHEME_H, transform: `scale(${scale})` }}>
+                <svg className="absolute inset-0" width={SCHEME_W} height={SCHEME_H} viewBox={`0 0 ${SCHEME_W} ${SCHEME_H}`}>
+                    {line("M118 144 H150")}
+                    {line("M268 144 C 290 144, 280 50, 304 50")}
+                    {line("M268 144 H304")}
+                    {line("M268 144 C 290 144, 280 238, 304 238")}
+                    {line("M422 50 H442")}
+                </svg>
+                {node("email_trigger", "Почта", 0, 122, 118)}
+                {node("agent", "ИИ-агент", 150, 122, 118)}
+                {node("llm", "Нейросеть", 304, 28, 118)}
+                {node("email_send", "Отправить письмо", 442, 28, 134)}
+                {node("google_sheets_append", "Таблица", 304, 122, 118)}
+                {node("google_calendar_create_event", "Календарь", 304, 216, 118)}
+            </div>
         </div>
     );
 }
@@ -62,7 +99,6 @@ export default function Landing() {
                             </Link>
                             <Link to="/about#pricing"><Button size="lg" variant="secondary">{t("landing.seePricing")}</Button></Link>
                         </div>
-                        {!me && <p className="mt-4 text-xs text-gray-400">{t("landing.noCard")}</p>}
                     </div>
                     <FlowIllustration />
                 </div>

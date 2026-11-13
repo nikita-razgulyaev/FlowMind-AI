@@ -124,7 +124,7 @@ export default function ExecutionHistory() {
                         )}
                     </div>
                     <p className="text-sm text-gray-500 mt-1 mb-8">
-                        Все запуски по всем воркфлоу
+                        Все запуски по всем сценариям
                     </p>
 
                     {isLoading ? (
@@ -195,7 +195,7 @@ export default function ExecutionHistory() {
                                                         `/workflow/${ex.workflow_id}?log=${ex.id}`,
                                                     )
                                                 }
-                                                title="Открыть воркфлоу и лог этого запуска"
+                                                title="Открыть сценарий и журнал этого запуска"
                                                 className="flex-1 flex items-center gap-3 pr-4 py-3 text-left hover:bg-gray-50 min-w-0"
                                             >
                                                 <span

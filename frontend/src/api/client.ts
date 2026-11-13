@@ -184,10 +184,13 @@ class ApiClient {
         return request<Connection>("/connections", json("POST", connection));
     }
     deleteConnection(id: number) { return request<{ deleted: number }>(`/connections/${id}`, json("DELETE")); }
-    startGoogleOAuth(provider: string, name: string) {
+    startOAuth(provider: string, name: string, reconnectId?: number) {
+        const extra = reconnectId ? `&reconnect_id=${reconnectId}` : "";
         return request<{ auth_url: string }>(
-            `/oauth/google/start?provider=${encodeURIComponent(provider)}&name=${encodeURIComponent(name)}`);
+            `/oauth/start?provider=${encodeURIComponent(provider)}&name=${encodeURIComponent(name)}${extra}`);
     }
+    getAiModels() { return request<{ default: string; models: { name: string; model: string; host: string; main: boolean; state: string }[] }>("/ai/models"); }
+    getOAuthStatus() { return request<Record<string, boolean>>("/oauth/status"); }
 
     // ───── Telegram ─────
     getTelegramStatus() {
