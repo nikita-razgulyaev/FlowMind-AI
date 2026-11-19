@@ -21,7 +21,7 @@ export function Button({ variant = "primary", loading, size = "md", className = 
         <button
             {...rest}
             disabled={disabled || loading}
-            className={`inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${sizes[size]} ${BUTTON_VARIANTS[variant]} ${className}`}
+            className={`inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${sizes[size]} ${BUTTON_VARIANTS[variant]} ${className}`}
         >
             {loading && <Loader2 className="w-4 h-4 animate-spin" />}
             {children}

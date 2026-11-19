@@ -31,3 +31,17 @@
     from { transform: scaleX(0); opacity: 0; }
     to { transform: scaleX(1); opacity: 1; }
 }
+
+/* Ensure interactive elements show pointer cursor */
+button:not(:disabled),
+a[href],
+[role="button"]:not([aria-disabled="true"]),
+label[for],
+summary {
+  cursor: pointer;
+}
+
+button:disabled,
+[aria-disabled="true"] {
+  cursor: not-allowed;
+}

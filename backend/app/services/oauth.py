@@ -19,7 +19,7 @@ GOOGLE_BASE = "https://www.googleapis.com/auth/"
 PROVIDERS: dict[str, dict] = {
     "google_sheets": {"family": "google", "scopes": [GOOGLE_BASE + "spreadsheets"]},
     "google_calendar": {"family": "google", "scopes": [GOOGLE_BASE + "calendar"]},
-    "google_gmail": {"family": "google", "scopes": ["https://mail.google.com/"], "mail": True},
+    "google_gmail": {"family": "google", "scopes": ["https://mail.google.com/", "openid", "email"], "mail": True},
     "yandex_mail": {"family": "yandex", "scopes": ["mail:imap_ro", "mail:smtp", "login:email"], "mail": True},
     # Яндекс Таблицы хранятся на Диске; отдельного cell-level API нет — работаем через Disk API
     "yandex_sheets": {

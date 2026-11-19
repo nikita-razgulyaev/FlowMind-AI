@@ -52,7 +52,7 @@ def latest(user, provider):
     return max(rows, key=lambda c: c["id"])
 
 
-def google_handler(scope="https://mail.google.com/", email="anna@gmail.com", calls=None):
+def google_handler(scope="https://mail.google.com/ openid email", email="anna@gmail.com", calls=None):
     def handler(request: httpx.Request):
         if calls is not None:
             calls.append((request.method, str(request.url), request.content.decode()))
@@ -75,7 +75,7 @@ def test_status_and_unconfigured(user, monkeypatch):
 
 def test_pkce_is_s256_and_verifier_never_in_url(user):
     url, q = start(user, "google_gmail")
-    assert q["code_challenge_method"] == "S256" and q["scope"] == "https://mail.google.com/"
+    assert q["code_challenge_method"] == "S256" and "mail.google.com" in q["scope"] and "email" in q["scope"]
     assert q["access_type"] == "offline" and q["include_granted_scopes"] == "false"
     state = oauth.read_state(q["state"])
     verifier = oauth.pkce_verifier(state["r"])

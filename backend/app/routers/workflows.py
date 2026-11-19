@@ -280,10 +280,11 @@ async def create_from_template(template_id: str, user: User = Depends(get_curren
             cfg["mode"], cfg["model"] = "local", settings.ollama_model     # в локальной версии шаблоны работают на Ollama
     is_ai, has_tg = workflow_flags(nodes)
     plan = await get_user_plan(db, user)
-    await check_workflow_quota(db, user, plan, is_ai=is_ai, has_tg=has_tg, active=True)
+    await check_workflow_quota(db, user, plan, is_ai=is_ai, has_tg=has_tg, active=template.get("is_active", False))
+    is_active = template.get("is_active", False)
     wf = Workflow(user_id=user.id, name=template["name"], description=template.get("description", ""),
-                  nodes=nodes, edges=copy.deepcopy(template["edges"]), is_active=True,
-                  is_ai=is_ai, has_telegram_trigger=has_tg)
+                  nodes=nodes, edges=copy.deepcopy(template["edges"]), is_active=is_active,
+                  activated_at=utcnow() if is_active else None, is_ai=is_ai, has_telegram_trigger=has_tg)
     db.add(wf)
     await db.commit()
     await db.refresh(wf)
