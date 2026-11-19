@@ -52,7 +52,7 @@ def latest(user, provider):
     return max(rows, key=lambda c: c["id"])
 
 
-def google_handler(scope="https://mail.google.com/ openid email", email="anna@gmail.com", calls=None):
+def google_handler(scope="https://mail.google.com/ openid https://www.googleapis.com/auth/userinfo.email", email="anna@gmail.com", calls=None):
     def handler(request: httpx.Request):
         if calls is not None:
             calls.append((request.method, str(request.url), request.content.decode()))
@@ -75,7 +75,7 @@ def test_status_and_unconfigured(user, monkeypatch):
 
 def test_pkce_is_s256_and_verifier_never_in_url(user):
     url, q = start(user, "google_gmail")
-    assert q["code_challenge_method"] == "S256" and "mail.google.com" in q["scope"] and "email" in q["scope"]
+    assert q["code_challenge_method"] == "S256" and "mail.google.com" in q["scope"] and "userinfo.email" in q["scope"]
     assert q["access_type"] == "offline" and q["include_granted_scopes"] == "false"
     state = oauth.read_state(q["state"])
     verifier = oauth.pkce_verifier(state["r"])
@@ -111,7 +111,7 @@ def test_denied_and_missing_scope_and_foreign_state(user, monkeypatch):
     def handler(request):
         if request.url.path == "/revoke":
             revoked.append(request.content.decode())
-        return google_handler(scope="openid email")(request)   # пользователь снял галочку с нужного права
+        return google_handler(scope="openid https://www.googleapis.com/auth/userinfo.email")(request)  # нет mail.google.com
     mock_net(monkeypatch, oauth, handler)
     _, q = start(user, "google_sheets")
     r = callback(user, "google", code="abc", state=q["state"])

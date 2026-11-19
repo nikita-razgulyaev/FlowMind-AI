@@ -79,6 +79,19 @@ export function validateWorkflow(nodes: WorkflowNode[], edges: WorkflowEdge[], c
             else if (connections.length && !connectionIds.has(cfg.connection_id)) add("error", "Выбранное подключение удалено: выберите другое");
         }
 
+        // Шаг подключён к агенту как инструмент — нужны название и описание
+        const linkedAsTool = edges.some((e) => e.type === "tool" && e.to_node === node.id);
+        if (linkedAsTool) {
+            const asTool = !!cfg.as_agent_tool || !!(cfg.tool_name && String(cfg.tool_name).trim());
+            if (!asTool) {
+                add("warning", "Шаг соединён с ИИ-агентом, но не отмечен как инструмент: включите «Инструмент для ИИ-агента» и заполните название");
+            } else if (missingField(node, "tool_name")) {
+                add("error", "Для инструмента агента не задано название (латиницей)");
+            } else if (missingField(node, "tool_description")) {
+                add("warning", "Для инструмента агента нет описания — агенту будет сложнее понять, когда его вызывать");
+            }
+        }
+
         const upstream = new Set(upstreamIds(node.id, edges));
         const reported = new Set<string>();
         for (const text of configStrings(cfg)) {

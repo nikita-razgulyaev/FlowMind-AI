@@ -106,11 +106,16 @@ export default function ToolSettingsFields({
     cfg,
     set,
     preset,
+    linkedAsTool = false,
 }: {
     cfg: Record<string, any>;
     set: (patch: Record<string, any>) => void;
     preset: ToolPreset;
+    /** Шаг уже соединён с агентом ребром «инструмент» */
+    linkedAsTool?: boolean;
 }) {
+    // По умолчанию скрыто; если уже заполняли или шаг подключён к агенту — считаем включённым
+    const enabled = !!cfg.as_agent_tool || !!(cfg.tool_name && String(cfg.tool_name).trim()) || linkedAsTool;
     const initial = cfg.tool_parameters ?? paramsToSchema(preset.params);
     const initialRows = typeof initial === "string" ? null : schemaToParams(initial);
     const toEditable = (list: ToolParam[]): EditableRow[] => list.map((p) => ({ ...p, examplesText: p.examples.join("; ") }));
@@ -130,7 +135,7 @@ export default function ToolSettingsFields({
     const updateRow = (index: number, patch: Partial<EditableRow>) =>
         commitRows((rows ?? []).map((r, i) => (i === index ? { ...r, ...patch } : r)));
     const applyPreset = () => {
-        set({ tool_name: preset.name, tool_description: preset.description });
+        set({ tool_name: preset.name, tool_description: preset.description, as_agent_tool: true });
         commitRows(toEditable(preset.params));
         setJsonError(false);
     };
@@ -147,21 +152,53 @@ export default function ToolSettingsFields({
         }
     };
 
+    const toggle = (on: boolean) => {
+        if (on) {
+            const patch: Record<string, any> = { as_agent_tool: true };
+            if (!(cfg.tool_name && String(cfg.tool_name).trim())) {
+                patch.tool_name = preset.name;
+                patch.tool_description = preset.description;
+            }
+            set(patch);
+            if (!(cfg.tool_name && String(cfg.tool_name).trim()) && (rows === null || rows.length === 0)) {
+                commitRows(toEditable(preset.params));
+            }
+        } else {
+            set({ as_agent_tool: false });
+        }
+    };
+
     return (
         <div className="pt-3 border-t border-gray-100 space-y-3">
-            <div>
-                <p className="text-sm font-semibold text-gray-700">Инструмент для ИИ-агента</p>
-                <p className="mt-0.5 text-xs leading-snug text-gray-400">
-                    Заполните, только если этот шаг подключён к ИИ-агенту: так агент поймёт, что делает шаг и какие данные ему нужны. Если шаг
-                    стоит в обычной цепочке, раздел можно не заполнять.
-                </p>
-            </div>
+            <label className="flex items-start gap-2 cursor-pointer select-none">
+                <input
+                    type="checkbox"
+                    className="mt-0.5 rounded border-gray-300"
+                    checked={enabled}
+                    onChange={(e) => toggle(e.target.checked)}
+                />
+                <span>
+                    <span className="block text-sm font-semibold text-gray-700">Инструмент для ИИ-агента</span>
+                    <span className="block mt-0.5 text-xs leading-snug text-gray-400">
+                        Включите, если этот шаг подключён к ИИ-агенту ребром «↓ инструменты». Агент получит название, описание и параметры.
+                        В обычной цепочке раздел можно не заполнять.
+                    </span>
+                </span>
+            </label>
 
+            {linkedAsTool && !enabled && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                    Шаг уже соединён с агентом, но галочка не включена. Включите её и заполните название/описание, иначе агент не сможет вызывать этот инструмент.
+                </p>
+            )}
+
+            {enabled && (
+            <>
             <div>
                 <label className={label}>Название инструмента (латиницей, без пробелов)</label>
                 <input
                     value={cfg.tool_name || ""}
-                    onChange={(e) => set({ tool_name: e.target.value })}
+                    onChange={(e) => set({ tool_name: e.target.value, as_agent_tool: true })}
                     placeholder={preset.name}
                     className={mono}
                 />
@@ -170,7 +207,7 @@ export default function ToolSettingsFields({
                 <label className={label}>Описание для нейросети: что делает инструмент и когда его вызывать</label>
                 <input
                     value={cfg.tool_description || ""}
-                    onChange={(e) => set({ tool_description: e.target.value })}
+                    onChange={(e) => set({ tool_description: e.target.value, as_agent_tool: true })}
                     placeholder={preset.description}
                     className={input}
                 />
@@ -262,6 +299,8 @@ export default function ToolSettingsFields({
                     </button>
                 )}
             </div>
+            </>
+            )}
         </div>
     );
 }

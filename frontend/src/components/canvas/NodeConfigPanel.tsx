@@ -112,6 +112,18 @@ function ModelPicker({
     );
 }
 
+
+function formatConnectionLabel(c: { name: string; account?: string; needs_reauth?: boolean }) {
+    const name = (c.name || "").trim();
+    const account = (c.account || "").trim();
+    // Не дублируем email в скобках, если имя уже совпадает с аккаунтом
+    const showAccount = account && account.toLowerCase() !== name.toLowerCase();
+    let label = name || account || "Без названия";
+    if (showAccount) label += ` (${account})`;
+    if (c.needs_reauth) label += " — нужен повторный вход";
+    return label;
+}
+
 function ConnectHint({ what }: { what: string }) {
     return (
         <p className="text-xs text-amber-600 mt-1">
@@ -241,6 +253,7 @@ export default function NodeConfigPanel({
     const meta = NODE_META[node.type] ?? NODE_META.print;
     const cfg = node.config || {};
     const set = (patch: Record<string, any>) => onChange({ ...cfg, ...patch });
+    const linkedAsTool = edges.some((e: any) => e.type === "tool" && e.to_node === node.id);
 
     const names = useMemo(() => buildNames(allNodes), [allNodes]);
     const dataGroups = useMemo(
@@ -466,7 +479,7 @@ export default function NodeConfigPanel({
                         <p className="text-xs text-gray-400">
                             Если сервис ответил данными в формате JSON, их можно использовать так: {"{имя_шага.json.поле}"}.
                         </p>
-                        <ToolSettingsFields key={node.id} cfg={cfg} set={set} preset={TOOL_PRESETS.http} />
+                        <ToolSettingsFields key={node.id} cfg={cfg} set={set} preset={TOOL_PRESETS.http} linkedAsTool={linkedAsTool} />
                     </>
                 )}
 
@@ -538,7 +551,7 @@ export default function NodeConfigPanel({
                                 className={input}
                             />
                         </div>
-                        <ToolSettingsFields key={node.id} cfg={cfg} set={set} preset={TOOL_PRESETS.telegram_send} />
+                        <ToolSettingsFields key={node.id} cfg={cfg} set={set} preset={TOOL_PRESETS.telegram_send} linkedAsTool={linkedAsTool} />
                     </>
                 )}
 
@@ -630,7 +643,7 @@ export default function NodeConfigPanel({
                                 className={input}
                             />
                         </div>
-                        <ToolSettingsFields key={node.id} cfg={cfg} set={set} preset={TOOL_PRESETS.google_sheets_append} />
+                        <ToolSettingsFields key={node.id} cfg={cfg} set={set} preset={TOOL_PRESETS.google_sheets_append} linkedAsTool={linkedAsTool} />
                     </>
                 )}
 
@@ -654,7 +667,7 @@ export default function NodeConfigPanel({
                                 <option value="">— выберите подключение —</option>
                                 {calendarConnections.map((c) => (
                                     <option key={c.id} value={c.id}>
-                                        {c.name}{c.account ? ` (${c.account})` : ""}{c.needs_reauth ? " — нужен повторный вход" : ""}
+                                        {formatConnectionLabel(c)}
                                     </option>
                                 ))}
                             </select>
@@ -726,7 +739,7 @@ export default function NodeConfigPanel({
                                 />
                             </div>
                         </div>
-                        <ToolSettingsFields key={node.id} cfg={cfg} set={set} preset={TOOL_PRESETS.google_calendar_create_event} />
+                        <ToolSettingsFields key={node.id} cfg={cfg} set={set} preset={TOOL_PRESETS.google_calendar_create_event} linkedAsTool={linkedAsTool} />
                     </>
                 )}
 
@@ -1098,7 +1111,7 @@ export default function NodeConfigPanel({
                                 <option value="">— выберите подключение —</option>
                                 {emailConnections.map((c) => (
                                     <option key={c.id} value={c.id}>
-                                        {c.name}{c.account ? ` (${c.account})` : ""}{c.needs_reauth ? " — нужен повторный вход" : ""}
+                                        {formatConnectionLabel(c)}
                                     </option>
                                 ))}
                             </select>
@@ -1142,7 +1155,7 @@ export default function NodeConfigPanel({
                                 <option value="">— выберите подключение —</option>
                                 {emailConnections.map((c) => (
                                     <option key={c.id} value={c.id}>
-                                        {c.name}{c.account ? ` (${c.account})` : ""}{c.needs_reauth ? " — нужен повторный вход" : ""}
+                                        {formatConnectionLabel(c)}
                                     </option>
                                 ))}
                             </select>
@@ -1167,7 +1180,7 @@ export default function NodeConfigPanel({
                             <input type="checkbox" checked={!!cfg.as_reply} onChange={(e) => set({ as_reply: e.target.checked })} />
                             Отправить как ответ в переписке (работает после шага «Новое письмо»)
                         </label>
-                        <ToolSettingsFields key={node.id} cfg={cfg} set={set} preset={TOOL_PRESETS.email_send} />
+                        <ToolSettingsFields key={node.id} cfg={cfg} set={set} preset={TOOL_PRESETS.email_send} linkedAsTool={linkedAsTool} />
                     </>
                 )}
 

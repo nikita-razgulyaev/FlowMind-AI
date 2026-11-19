@@ -19,7 +19,7 @@ GOOGLE_BASE = "https://www.googleapis.com/auth/"
 PROVIDERS: dict[str, dict] = {
     "google_sheets": {"family": "google", "scopes": [GOOGLE_BASE + "spreadsheets"]},
     "google_calendar": {"family": "google", "scopes": [GOOGLE_BASE + "calendar"]},
-    "google_gmail": {"family": "google", "scopes": ["https://mail.google.com/", "openid", "email"], "mail": True},
+    "google_gmail": {"family": "google", "scopes": ["https://mail.google.com/", "openid", "https://www.googleapis.com/auth/userinfo.email"], "mail": True},
     "yandex_mail": {"family": "yandex", "scopes": ["mail:imap_ro", "mail:smtp", "login:email"], "mail": True},
     # Яндекс Таблицы хранятся на Диске; отдельного cell-level API нет — работаем через Disk API
     "yandex_sheets": {
@@ -106,6 +106,9 @@ def build_auth_url(provider: str, state: str, nonce: str) -> str:
         params["scope"] = " ".join(scopes)
     if family == "google":
         params.update({"access_type": "offline", "prompt": "consent", "include_granted_scopes": "false"})
+    if family == "yandex":
+        # Всегда показать экран согласия (иначе Яндекс может тихо отказать или переиспользовать старый грант)
+        params["force_confirm"] = "yes"
     if fam["pkce"]:
         params.update({"code_challenge": pkce_challenge(nonce), "code_challenge_method": "S256"})
     return f"{fam['auth']()}?{urlencode(params)}"
@@ -199,12 +202,46 @@ async def fetch_account(provider: str, tokens: dict) -> dict:
     return {}
 
 
+# Короткие имена Google ↔ полные URI (в токене часто приходит полный вид)
+_GOOGLE_SCOPE_ALIASES = {
+    "email": "https://www.googleapis.com/auth/userinfo.email",
+    "profile": "https://www.googleapis.com/auth/userinfo.profile",
+    "openid": "openid",
+}
+
+
+def _normalize_google_scope(scope: str) -> str:
+    s = (scope or "").strip()
+    return _GOOGLE_SCOPE_ALIASES.get(s, s)
+
+
 def missing_scopes(provider: str, tokens: dict) -> list[str]:
-    """Google позволяет снять галочки с запрошенных прав. Если нужного права нет, подключение бесполезно."""
+    """Проверка, что Google реально выдал нужные права.
+
+    На экране согласия не всегда есть отдельные галочки: базовые openid/email
+    могут выдаваться без UI, а mail.google.com — одним пунктом. Сравниваем
+    с учётом коротких имён и полных URI из ответа token endpoint.
+    """
     if family_of(provider) != "google":
         return []
-    granted = set((tokens.get("scope") or "").split())
-    return [s for s in scopes_for(provider) if granted and s not in granted]
+    raw = (tokens.get("scope") or "").strip()
+    if not raw:
+        # Пустой scope в ответе — не считаем ошибкой прав (некоторые клиенты не возвращают scope)
+        return []
+    granted = {_normalize_google_scope(s) for s in raw.split() if s}
+    # Также принимаем «родительские» scope: mail.google.com покрывает gmail.*
+    missing = []
+    for needed in scopes_for(provider):
+        n = _normalize_google_scope(needed)
+        if n in granted:
+            continue
+        # mail.google.com в granted покрывает любые gmail-подправа
+        if n.startswith("https://www.googleapis.com/auth/gmail") and "https://mail.google.com/" in granted:
+            continue
+        if n == "openid" and any("openid" in g for g in granted):
+            continue
+        missing.append(needed)
+    return missing
 
 
 async def revoke(provider: str, cfg: dict) -> None:
