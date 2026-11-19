@@ -1,12 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { X, Trash2 } from "lucide-react";
-import type { WorkflowNode, Connection } from "../../types/workflow";
+import type { WorkflowNode, WorkflowEdge, Connection } from "../../types/workflow";
 import { api } from "../../api/client";
 import { NODE_META } from "./CanvasNode";
 import { useAuth } from "../../store/auth";
 import ToolSettingsFields, { TOOL_PRESETS } from "./ToolSettings";
 import { NODE_INFO } from "../../utils/glossary";
 import { OPERATIONS, TEXT_OPERATIONS } from "../../utils/textOperations";
+import { buildDataGroups, buildNames } from "../../utils/stepData";
+import type { StepIssue } from "../../utils/validateWorkflow";
+import { DataPickerContext, RefInput, RefSelect, RefTextarea } from "./RefFields";
+import RulesEditor, { EMPTY_RULE } from "./RulesEditor";
+import StepTester from "./StepTester";
 
 const LLM_MODELS = {
     local: [
@@ -27,6 +32,13 @@ interface Props {
     onChange: (config: Record<string, any>) => void;
     onDelete: () => void;
     onClose: () => void;
+    /** Все шаги и связи сценария: нужны, чтобы предлагать данные предыдущих шагов. */
+    allNodes?: WorkflowNode[];
+    edges?: WorkflowEdge[];
+    /** Результаты шагов из последнего запуска: реальные примеры значений и данные для проверки шага. */
+    lastOutputs?: Record<string, unknown>;
+    lastInput?: string;
+    issues?: StepIssue[];
 }
 
 interface PlatformModel {
@@ -220,10 +232,21 @@ export default function NodeConfigPanel({
     onChange,
     onDelete,
     onClose,
+    allNodes = [],
+    edges = [],
+    lastOutputs = {},
+    lastInput = "",
+    issues = [],
 }: Props) {
     const meta = NODE_META[node.type] ?? NODE_META.print;
     const cfg = node.config || {};
     const set = (patch: Record<string, any>) => onChange({ ...cfg, ...patch });
+
+    const names = useMemo(() => buildNames(allNodes), [allNodes]);
+    const dataGroups = useMemo(
+        () => buildDataGroups(node.id, allNodes, edges, lastOutputs),
+        [node.id, allNodes, edges, lastOutputs],
+    );
 
     const [connections, setConnections] = useState<Connection[]>([]);
     // В облачной версии локальные модели (Ollama) недоступны — режим только Cloud.
@@ -259,8 +282,9 @@ export default function NodeConfigPanel({
     const isYandexCalendar = selectedCalendar?.provider === "yandex_calendar";
 
     return (
+        <DataPickerContext.Provider value={{ groups: dataGroups, names }}>
         <div className="w-96 shrink-0 bg-white border-l border-gray-200 h-full overflow-y-auto">
-            <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100 sticky top-0 bg-white">
+            <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100 sticky top-0 z-10 bg-white">
                 <span
                     className={`text-xs px-2 py-0.5 rounded-full font-medium ${meta.badge}`}
                 >
@@ -288,6 +312,18 @@ export default function NodeConfigPanel({
             {NODE_INFO[node.type] && (
                 <p className="px-4 pt-3 text-xs leading-snug text-gray-500">{NODE_INFO[node.type].hint}</p>
             )}
+
+            {issues.length > 0 && (
+                <ul className="mx-4 mt-3 space-y-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                    {issues.map((issue, i) => (
+                        <li key={i} className={`text-xs leading-snug ${issue.level === "error" ? "text-red-700" : "text-amber-800"}`}>
+                            {issue.level === "error" ? "⚠ " : "• "}
+                            {issue.message}
+                        </li>
+                    ))}
+                </ul>
+            )}
+
 
             <div className="p-4 space-y-4">
                 {node.type === "llm" && (
@@ -346,7 +382,7 @@ export default function NodeConfigPanel({
                             <label className={label}>
                                 Запрос к нейросети (промпт). В нём можно использовать {"{input}"} — сообщение клиента — и {"{имя_шага}"} — результат другого шага
                             </label>
-                            <textarea
+                            <RefTextarea
                                 value={cfg.prompt || ""}
                                 onChange={(e) =>
                                     set({ prompt: e.target.value })
@@ -357,7 +393,7 @@ export default function NodeConfigPanel({
                         </div>
                         <div>
                             <label className={label}>
-                                Temperature: {cfg.temperature ?? 0.7}
+                                Креативность ответа: {cfg.temperature ?? 0.7}
                             </label>
                             <input
                                 type="range"
@@ -372,6 +408,11 @@ export default function NodeConfigPanel({
                                 }
                                 className="w-full"
                             />
+                            <div className="flex justify-between text-[11px] text-gray-400">
+                                <span>Точнее</span>
+                                <span>Свободнее</span>
+                            </div>
+                            <p className="mt-1 text-[11px] leading-snug text-gray-400">Чем ниже значение, тем предсказуемее и ближе к заданию ответ; чем выше, тем разнообразнее и свободнее формулировки.</p>
                         </div>
                     </>
                 )}
@@ -395,7 +436,7 @@ export default function NodeConfigPanel({
                             <label className={label}>
                                 URL (можно с {"{param}"})
                             </label>
-                            <input
+                            <RefInput
                                 value={cfg.url || ""}
                                 onChange={(e) => set({ url: e.target.value })}
                                 placeholder="https://api.example.com/orders/{order_id}"
@@ -404,7 +445,7 @@ export default function NodeConfigPanel({
                         </div>
                         <div>
                             <label className={label}>Headers (JSON, необязательно)</label>
-                            <input
+                            <RefInput
                                 value={cfg.headers || ""}
                                 onChange={(e) => set({ headers: e.target.value })}
                                 placeholder='{"Authorization": "Bearer ..."}'
@@ -414,7 +455,7 @@ export default function NodeConfigPanel({
                         {cfg.method === "POST" && (
                             <div>
                                 <label className={label}>Body (JSON или текст)</label>
-                                <textarea
+                                <RefTextarea
                                     value={cfg.body || ""}
                                     onChange={(e) => set({ body: e.target.value })}
                                     rows={3}
@@ -461,7 +502,7 @@ export default function NodeConfigPanel({
                             <label className={label}>
                                 Куда отправить: ID чата или канал (оставьте пустым — ответ уйдёт тому, кто написал)
                             </label>
-                            <input
+                            <RefInput
                                 value={cfg.chat_id || ""}
                                 onChange={(e) =>
                                     set({ chat_id: e.target.value })
@@ -475,7 +516,7 @@ export default function NodeConfigPanel({
                         </div>
                         <div>
                             <label className={label}>Картинка: прямая ссылка (необязательно)</label>
-                            <input
+                            <RefInput
                                 value={cfg.photo_url || ""}
                                 onChange={(e) => set({ photo_url: e.target.value })}
                                 placeholder="https://example.com/cover.jpg"
@@ -487,7 +528,7 @@ export default function NodeConfigPanel({
                             <label className={label}>
                                 Сообщение (результаты других шагов подставляются в фигурных скобках, например {"{reply}"})
                             </label>
-                            <textarea
+                            <RefTextarea
                                 value={cfg.message || ""}
                                 onChange={(e) =>
                                     set({ message: e.target.value })
@@ -580,7 +621,7 @@ export default function NodeConfigPanel({
                             <label className={label}>
                                 Значения строки через запятую (можно подставлять данные в фигурных скобках)
                             </label>
-                            <input
+                            <RefInput
                                 value={cfg.values || ""}
                                 onChange={(e) =>
                                     set({ values: e.target.value })
@@ -638,7 +679,7 @@ export default function NodeConfigPanel({
                             <label className={label}>
                                 Название события (данные из других шагов подставляются в фигурных скобках)
                             </label>
-                            <input
+                            <RefInput
                                 value={cfg.summary || ""}
                                 onChange={(e) =>
                                     set({ summary: e.target.value })
@@ -649,7 +690,7 @@ export default function NodeConfigPanel({
                         </div>
                         <div>
                             <label className={label}>Описание</label>
-                            <input
+                            <RefInput
                                 value={cfg.description || ""}
                                 onChange={(e) =>
                                     set({ description: e.target.value })
@@ -662,7 +703,7 @@ export default function NodeConfigPanel({
                                 <label className={label}>
                                     Начало (например, 2026-08-01T15:00:00+03:00)
                                 </label>
-                                <input
+                                <RefInput
                                     value={cfg.start_datetime || ""}
                                     onChange={(e) =>
                                         set({ start_datetime: e.target.value })
@@ -675,7 +716,7 @@ export default function NodeConfigPanel({
                                 <label className={label}>
                                     Конец (например, 2026-08-01T16:00:00+03:00)
                                 </label>
-                                <input
+                                <RefInput
                                     value={cfg.end_datetime || ""}
                                     onChange={(e) =>
                                         set({ end_datetime: e.target.value })
@@ -690,22 +731,43 @@ export default function NodeConfigPanel({
                 )}
 
                 {node.type === "condition" && (
-                    <div>
-                        <label className={label}>
-                            Условие (например, оценка не ниже 7)
-                        </label>
-                        <input
-                            value={cfg.expression || ""}
-                            onChange={(e) =>
-                                set({ expression: e.target.value })
-                            }
-                            placeholder="{extract.score} >= 7"
-                            className={input}
-                        />
-                        <p className="text-xs text-gray-400 mt-1">
-                            Выполнится только выбранная ветка: проведите связь от
-                            ветки «true» (условие выполнено) или «false» (не выполнено). Данные из ответа другого шага берутся так:{" "}
-                            {"{имя_шага.поле}"}.
+                    <div className="space-y-2">
+                        <div className="flex gap-1 rounded-lg bg-gray-100 p-0.5 text-xs">
+                            {[
+                                { id: "rules", title: "Простое условие" },
+                                { id: "expression", title: "Своё выражение" },
+                            ].map((m) => (
+                                <button
+                                    key={m.id}
+                                    type="button"
+                                    onClick={() =>
+                                        set(
+                                            m.id === "rules"
+                                                ? { mode: "rules", match: cfg.match || "all", rules: cfg.rules?.length ? cfg.rules : [{ ...EMPTY_RULE }] }
+                                                : { mode: "expression" },
+                                        )
+                                    }
+                                    className={`flex-1 rounded-md px-2 py-1 font-medium ${(cfg.mode === "rules" ? "rules" : "expression") === m.id ? "bg-white text-gray-800 shadow-sm" : "text-gray-500"}`}
+                                >
+                                    {m.title}
+                                </button>
+                            ))}
+                        </div>
+                        {cfg.mode === "rules" ? (
+                            <RulesEditor rules={cfg.rules ?? []} match={cfg.match === "any" ? "any" : "all"} onChange={set} />
+                        ) : (
+                            <div>
+                                <label className={label}>Условие (например, оценка не ниже 7)</label>
+                                <RefInput
+                                    value={cfg.expression || ""}
+                                    onChange={(e) => set({ expression: e.target.value })}
+                                    placeholder="{extract.score} >= 7"
+                                    className={input}
+                                />
+                            </div>
+                        )}
+                        <p className="text-xs text-gray-400">
+                            Выполнится только выбранная ветка: проведите связь от ветки «true» (условие выполнено) или «false» (не выполнено).
                         </p>
                     </div>
                 )}
@@ -714,12 +776,7 @@ export default function NodeConfigPanel({
                     <>
                         <div>
                             <label className={label}>Значение</label>
-                            <input
-                                value={cfg.value || ""}
-                                onChange={(e) => set({ value: e.target.value })}
-                                placeholder="{classify}"
-                                className={input}
-                            />
+                            <RefSelect value={cfg.value ?? ""} mode={cfg.value_mode} onChange={(p) => set({ value: p.value, value_mode: p.mode })} inputClassName={input} />
                         </div>
                         <div>
                             <label className={label}>Варианты (через запятую)</label>
@@ -736,10 +793,52 @@ export default function NodeConfigPanel({
                     </>
                 )}
 
+                {node.type === "keyword_switch" && (
+                    <>
+                        <div>
+                            <label className={label}>Что проверяем</label>
+                            <RefSelect value={cfg.value ?? "{input}"} mode={cfg.value_mode} onChange={(p) => set({ value: p.value, value_mode: p.mode })} inputClassName={input} />
+                        </div>
+                        <div>
+                            <label className={label}>Типы и ключевые слова</label>
+                            <textarea
+                                value={cfg.rules ?? ""}
+                                onChange={(e) => set({ rules: e.target.value })}
+                                rows={5}
+                                placeholder={"доставка: где заказ, трек, курьер\nоплата: оплата, счёт, чек"}
+                                className={input}
+                            />
+                            <p className="text-xs text-gray-400 mt-1">
+                                Каждый тип с новой строки: название, двоеточие и слова через запятую. Сравнение без учёта регистра и знаков препинания; сработает первый подходящий тип.
+                            </p>
+                        </div>
+                        <div>
+                            <label className={label}>Если ни одно слово не найдено</label>
+                            <input value={cfg.default_label ?? "другое"} onChange={(e) => set({ default_label: e.target.value })} className={input} />
+                        </div>
+                    </>
+                )}
+
+                {node.type === "text_assemble" && (
+                    <div>
+                        <label className={label}>Шаблон текста</label>
+                        <RefTextarea
+                            value={cfg.template ?? ""}
+                            onChange={(e) => set({ template: e.target.value })}
+                            rows={6}
+                            placeholder="Здравствуйте! Ваш заказ принят."
+                            className={input}
+                        />
+                        <p className="text-xs text-gray-400 mt-1">
+                            Впишите текст и добавьте данные из других шагов кнопкой «Вставить данные из шага» вверху: поставьте курсор в нужное место поля.
+                        </p>
+                    </div>
+                )}
+
                 {node.type === "set" && (
                     <div>
                         <label className={label}>Значения (key=value, по строке)</label>
-                        <textarea
+                        <RefTextarea
                             value={cfg.values || ""}
                             onChange={(e) => set({ values: e.target.value })}
                             rows={5}
@@ -757,7 +856,7 @@ export default function NodeConfigPanel({
                         <label className={label}>
                             Что показать (результат другого шага указывается в фигурных скобках, например {"{reply}"})
                         </label>
-                        <input
+                        <RefInput
                             value={cfg.value || ""}
                             onChange={(e) => set({ value: e.target.value })}
                             placeholder="Result: {llm_1}"
@@ -822,7 +921,7 @@ export default function NodeConfigPanel({
                         <ModelPicker cfg={cfg} set={set} aiConnections={aiConnections} platformModels={platformModels} />
                         <div>
                             <label className={label}>System prompt</label>
-                            <textarea
+                            <RefTextarea
                                 value={cfg.system_prompt || ""}
                                 onChange={(e) =>
                                     set({ system_prompt: e.target.value })
@@ -836,7 +935,7 @@ export default function NodeConfigPanel({
                             <label className={label}>
                                 User prompt (обычно {"{input}"})
                             </label>
-                            <input
+                            <RefInput
                                 value={cfg.prompt || "{input}"}
                                 onChange={(e) =>
                                     set({ prompt: e.target.value })
@@ -866,8 +965,7 @@ export default function NodeConfigPanel({
                         </div>
                         <div>
                             <label className={label}>
-                                Temperature: {cfg.temperature ?? 0.3} (ниже —
-                                стабильнее tool calling)
+                                Креативность ответа: {cfg.temperature ?? 0.3}
                             </label>
                             <input
                                 type="range"
@@ -882,6 +980,11 @@ export default function NodeConfigPanel({
                                 }
                                 className="w-full"
                             />
+                            <div className="flex justify-between text-[11px] text-gray-400">
+                                <span>Точнее</span>
+                                <span>Свободнее</span>
+                            </div>
+                            <p className="mt-1 text-[11px] leading-snug text-gray-400">Для агента лучше низкое значение: он увереннее выбирает инструменты и реже ошибается в параметрах.</p>
                         </div>
                         <p className="text-xs text-gray-400">
                             Инструменты подключаются связью от нижнего разъёма агента («↓ инструменты агента») к любому шагу на рабочей области: запросу к сервису, Telegram, таблице, календарю или почте.
@@ -1047,18 +1150,18 @@ export default function NodeConfigPanel({
                         </div>
                         <div>
                             <label className={label}>Кому (адрес электронной почты)</label>
-                            <input value={cfg.to ?? ""} onChange={(e) => set({ to: e.target.value })} placeholder="{email_from}" className={input} />
+                            <RefInput value={cfg.to ?? ""} onChange={(e) => set({ to: e.target.value })} placeholder="{email_from}" className={input} />
                             <p className="text-xs text-gray-400 mt-1">
                                 {"{email_from}"} — отправитель входящего письма. Можно указать конкретный адрес или результат шага «Обработка текста» с найденным email.
                             </p>
                         </div>
                         <div>
                             <label className={label}>Тема письма</label>
-                            <input value={cfg.subject ?? ""} onChange={(e) => set({ subject: e.target.value })} placeholder="Re: {email_subject}" className={input} />
+                            <RefInput value={cfg.subject ?? ""} onChange={(e) => set({ subject: e.target.value })} placeholder="Re: {email_subject}" className={input} />
                         </div>
                         <div>
                             <label className={label}>Текст письма (результаты других шагов подставляются в фигурных скобках, например {"{reply}"})</label>
-                            <textarea value={cfg.body ?? ""} onChange={(e) => set({ body: e.target.value })} rows={6} className={input} />
+                            <RefTextarea value={cfg.body ?? ""} onChange={(e) => set({ body: e.target.value })} rows={6} className={input} />
                         </div>
                         <label className="flex items-center gap-2 text-sm text-gray-700">
                             <input type="checkbox" checked={!!cfg.as_reply} onChange={(e) => set({ as_reply: e.target.checked })} />
@@ -1073,8 +1176,8 @@ export default function NodeConfigPanel({
                         <div>
                             <label className={label}>Что сделать с текстом</label>
                             <select value={cfg.operation || "extract_order"} onChange={(e) => set({ operation: e.target.value })} className={input}>
-                                {(["Поиск", "Очистка"] as const).map((group) => (
-                                    <optgroup key={group} label={group === "Поиск" ? "Найти в тексте" : "Очистить или изменить"}>
+                                {(["Поиск", "Очистка", "Преобразование"] as const).map((group) => (
+                                    <optgroup key={group} label={group === "Поиск" ? "Найти в тексте" : group === "Очистка" ? "Очистить" : "Изменить и подставить"}>
                                         {TEXT_OPERATIONS.filter((o) => o.group === group).map((o) => (
                                             <option key={o.id} value={o.id}>
                                                 {o.label}
@@ -1087,15 +1190,21 @@ export default function NodeConfigPanel({
                         </div>
                         <div>
                             <label className={label}>Исходный текст</label>
-                            <input value={cfg.value ?? "{input}"} onChange={(e) => set({ value: e.target.value })} className={mono} />
+                            <RefSelect value={cfg.value ?? "{input}"} mode={cfg.value_mode} onChange={(p) => set({ value: p.value, value_mode: p.mode })} inputClassName={mono} />
                             <p className="text-xs text-gray-400 mt-1">
-                                {"{input}"} — сообщение клиента или текст письма. Можно указать результат другого шага, например {"{reply}"}.
+                                Выберите шаг, текст которого нужно обработать. «Ручной ввод» позволяет указать данные вручную, например {"{input}"} — сообщение клиента или текст письма.
                             </p>
                         </div>
                         {OPERATIONS[cfg.operation || "extract_order"]?.needsPattern && (
                             <div>
-                                <label className={label}>Шаблон поиска (регулярное выражение)</label>
-                                <input value={cfg.pattern ?? ""} onChange={(e) => set({ pattern: e.target.value })} placeholder="код (\\w+)" className={mono} />
+                                <label className={label}>{cfg.operation === "replace" ? "Что заменить" : "Шаблон поиска (регулярное выражение)"}</label>
+                                <input value={cfg.pattern ?? ""} onChange={(e) => set({ pattern: e.target.value })} placeholder={cfg.operation === "replace" ? "старый текст" : "код (\\w+)"} className={mono} />
+                            </div>
+                        )}
+                        {OPERATIONS[cfg.operation || "extract_order"]?.needsReplacement && (
+                            <div>
+                                <label className={label}>На что заменить</label>
+                                <RefInput value={cfg.replacement ?? ""} onChange={(e) => set({ replacement: e.target.value })} placeholder="новый текст (можно оставить пустым)" className={mono} />
                             </div>
                         )}
                         {OPERATIONS[cfg.operation || "extract_order"]?.needsLength && (
@@ -1130,7 +1239,9 @@ export default function NodeConfigPanel({
                         <TestInputField cfg={cfg} set={set} />
                     </>
                 )}
+                <StepTester key={node.id} node={node} lastOutputs={lastOutputs} defaultInput={cfg.test_input || lastInput} />
             </div>
         </div>
+        </DataPickerContext.Provider>
     );
 }

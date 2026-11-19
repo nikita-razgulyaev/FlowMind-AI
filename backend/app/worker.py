@@ -276,7 +276,7 @@ class WorkflowEngine:
     def _register_branch(self, node, result):
         if node["type"] == "condition":
             self.branches[node["id"]] = "true" if result else "false"
-        elif node["type"] == "switch":
+        elif node["type"] in ("switch", "keyword_switch"):
             self.branches[node["id"]] = str(result)
 
     def _get_handler(self, node_type):
@@ -290,6 +290,8 @@ class WorkflowEngine:
             "email_send": self._handle_email_send,
             "text_input": self._handle_text_input,
             "switch": self._handle_switch,
+            "keyword_switch": self._handle_keyword_switch,
+            "text_assemble": self._handle_text_assemble,
             "set": self._handle_set,
             "llm": self._handle_llm,
             "http": self._handle_http,
@@ -323,6 +325,7 @@ class WorkflowEngine:
         value = self._render_template(config.get("value") or "{input}", extra_vars)
         return textops.apply_operation(
             config.get("operation") or "trim", value, str(config.get("pattern", "")), config.get("max_chars") or 500,
+            self._render_template(str(config.get("replacement", "")), extra_vars),
         )
 
     async def _handle_email_send(self, config, td, extra_vars=None):
@@ -359,6 +362,24 @@ class WorkflowEngine:
             if normalize_label(case) and normalize_label(case) in value:
                 return case
         return "default"
+
+    async def _handle_keyword_switch(self, config, td, extra_vars=None):
+        """Классификация без нейросети: строки «категория: слово, слово». Берётся первая категория, чьё слово встречается в тексте."""
+        value = normalize_label(self._render_template(config.get("value", "{input}"), extra_vars))
+        for line in str(config.get("rules", "")).splitlines():
+            category, separator, words = line.partition(":")
+            category = category.strip()
+            if not (separator and category):
+                continue
+            for word in re.split(r"[,;]", words):
+                word = normalize_label(word)
+                if word and word in value:
+                    return category
+        return str(config.get("default_label") or "другое").strip()
+
+    async def _handle_text_assemble(self, config, td, extra_vars=None):
+        """Собирает текст из шаблона с вставками данных других шагов."""
+        return self._render_template(str(config.get("template", "")), extra_vars)
 
     async def _handle_set(self, config, td, extra_vars=None):
         """Набор именованных значений: строки key=value, доступны как {set_1.key}."""
@@ -588,6 +609,8 @@ class WorkflowEngine:
             return f"Calendar Error: {str(e)}"
 
     async def _handle_condition(self, config, td, extra_vars=None):
+        if config.get("mode") == "rules":
+            return self._check_rules(config, extra_vars)
         expression = self._render_template(config.get("expression", "True"), extra_vars)
         names = dict(self.context)
         if extra_vars:
@@ -596,6 +619,48 @@ class WorkflowEngine:
             return safe_eval(expression, names)
         except Exception:
             return False
+
+    def _check_rules(self, config, extra_vars=None) -> bool:
+        """Условие из форм: «значение — оператор — с чем сравнить»; все правила (И) или любое (ИЛИ)."""
+        rules = [r for r in (config.get("rules") or []) if isinstance(r, dict)]
+        if not rules:
+            return True
+        results = [self._check_rule(r, extra_vars) for r in rules]
+        return any(results) if config.get("match") == "any" else all(results)
+
+    def _check_rule(self, rule, extra_vars=None) -> bool:
+        value = self._render_template(str(rule.get("value", "")), extra_vars).strip()
+        expected = self._render_template(str(rule.get("expected", "")), extra_vars).strip()
+        operator = rule.get("operator") or "contains"
+        low, expected_low = value.casefold(), expected.casefold()
+        if operator == "empty":
+            return not value
+        if operator == "not_empty":
+            return bool(value)
+        if operator == "equals":
+            return low == expected_low
+        if operator == "not_equals":
+            return low != expected_low
+        if operator == "contains":
+            return expected_low in low
+        if operator == "not_contains":
+            return expected_low not in low
+        if operator == "starts_with":
+            return low.startswith(expected_low)
+        if operator == "ends_with":
+            return low.endswith(expected_low)
+        if operator == "regex":
+            try:
+                return re.search(expected, value) is not None
+            except re.error:
+                return False
+        if operator in ("gt", "gte", "lt", "lte"):
+            try:
+                a, b = float(value.replace(",", ".").replace(" ", "")), float(expected.replace(",", ".").replace(" ", ""))
+            except ValueError:
+                return False
+            return {"gt": a > b, "gte": a >= b, "lt": a < b, "lte": a <= b}[operator]
+        return False
 
     async def _handle_print(self, config, td, extra_vars=None):
         return self._render_template(config.get("value", "{last_result}"), extra_vars)

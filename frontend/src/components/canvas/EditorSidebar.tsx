@@ -3,6 +3,7 @@ import { useState } from "react";
 import { GraduationCap, Workflow, History, FileText, Plug, Settings, UserCircle, ShieldCheck, LogOut, CreditCard, Info } from "lucide-react";
 import { useAuth } from "../../store/auth";
 import TutorialModal from "../tutorial/TutorialModal";
+import ConfirmDialog from "../ConfirmDialog";
 
 const ITEMS: { to: string; icon: typeof Workflow; title: string }[] = [
     { to: "/", icon: Workflow, title: "Мои сценарии" },
@@ -15,6 +16,7 @@ export default function EditorSidebar() {
     const location = useLocation();
     const navigate = useNavigate();
     const { config, me, logout } = useAuth();
+    const [logoutOpen, setLogoutOpen] = useState(false);
     const [tutorialOpen, setTutorialOpen] = useState(false);
     const showAccount = !!config?.auth_required;
     const isAdmin = me?.user.role === "admin" && showAccount;
@@ -67,14 +69,23 @@ export default function EditorSidebar() {
                 <button
                     className={linkClass(false)}
                     title="Выйти"
-                    onClick={async () => {
-                        await logout();
-                        navigate("/");
-                    }}
+                    onClick={() => setLogoutOpen(true)}
                 >
                     <LogOut className="w-[18px] h-[18px]" />
                 </button>
             )}
+            <ConfirmDialog
+                open={logoutOpen}
+                title="Выйти из аккаунта?"
+                message="Несохранённые изменения будут потеряны. Сохранённые сценарии останутся на месте."
+                confirmLabel="Выйти"
+                onCancel={() => setLogoutOpen(false)}
+                onConfirm={async () => {
+                    setLogoutOpen(false);
+                    await logout();
+                    navigate("/");
+                }}
+            />
             <TutorialModal
                 open={tutorialOpen}
                 mode="tour"

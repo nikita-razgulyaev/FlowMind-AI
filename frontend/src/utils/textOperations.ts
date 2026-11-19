@@ -3,9 +3,10 @@ export interface TextOperation {
     id: string;
     label: string;
     hint: string;
-    group: "Поиск" | "Очистка";
+    group: "Поиск" | "Очистка" | "Преобразование";
     needsPattern?: boolean;
     needsLength?: boolean;
+    needsReplacement?: boolean;
 }
 
 export const TEXT_OPERATIONS: TextOperation[] = [
@@ -23,6 +24,13 @@ export const TEXT_OPERATIONS: TextOperation[] = [
     { id: "trim", label: "Убрать лишние пробелы", group: "Очистка", hint: "Убирает пробелы по краям и повторяющиеся пробелы внутри строки." },
     { id: "lower", label: "Строчные буквы", group: "Очистка", hint: "Переводит весь текст в строчные буквы." },
     { id: "upper", label: "ЗАГЛАВНЫЕ буквы", group: "Очистка", hint: "Переводит весь текст в заглавные буквы." },
+    { id: "extract_number", label: "Найти число", group: "Поиск", hint: "Находит первое число и приводит его к виду с точкой. Пример: «Итого 12 500,50 руб» → 12500.50." },
+    { id: "replace", label: "Заменить текст", group: "Преобразование", needsPattern: true, needsReplacement: true, hint: "Заменяет один фрагмент на другой везде в тексте. Если «на что заменить» пусто — фрагмент просто удаляется." },
+    { id: "capitalize", label: "Первая буква заглавная", group: "Преобразование", hint: "Делает заглавной первую букву текста." },
+    { id: "title_case", label: "Каждое слово с заглавной", group: "Преобразование", hint: "Приводит имена и заголовки к виду «Иван Петров»." },
+    { id: "one_line", label: "Склеить в одну строку", group: "Преобразование", hint: "Заменяет переносы строк и лишние пробелы одним пробелом." },
+    { id: "today", label: "Сегодняшняя дата", group: "Преобразование", hint: "Подставляет текущую дату в виде ДД.ММ.ГГГГ. Исходный текст не нужен." },
+    { id: "now", label: "Текущие дата и время", group: "Преобразование", hint: "Подставляет текущие дату и время в виде ДД.ММ.ГГГГ ЧЧ:ММ. Исходный текст не нужен." },
 ];
 
 export const OPERATIONS = Object.fromEntries(TEXT_OPERATIONS.map((o) => [o.id, o]));

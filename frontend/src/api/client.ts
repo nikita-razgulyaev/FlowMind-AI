@@ -153,6 +153,9 @@ class ApiClient {
     deleteWorkflow(id: number) { return request<{ message: string }>(`/workflows/${id}`, json("DELETE")); }
     bulkDeleteWorkflows(ids: number[]) { return request<{ deleted: number }>("/workflows/bulk-delete", json("POST", { ids })); }
     bulkDeleteExecutions(ids: number[]) { return request<{ deleted: number }>("/executions/bulk-delete", json("POST", { ids })); }
+    testNode(node: { id: string; type: string; config: Record<string, any> }, input: string, context: Record<string, unknown>) {
+        return request<{ output: any; branch: string | null }>("/workflows/test-node", json("POST", { node, input, context }));
+    }
     executeWorkflow(id: number, triggerData?: Record<string, any>) {
         return request<{ execution_id: number; status: string; result: any }>(
             `/workflows/${id}/execute`, json("POST", triggerData || {}));

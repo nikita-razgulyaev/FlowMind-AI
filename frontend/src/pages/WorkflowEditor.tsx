@@ -16,9 +16,13 @@ import {
     type Connection,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Save, Play, Square, Sparkles, Terminal } from "lucide-react";
+import { Save, Play, Square, Sparkles, Terminal, ShieldCheck, X as CloseIcon } from "lucide-react";
 import { api } from "../api/client";
-import type { WorkflowNode, WorkflowEdge } from "../types/workflow";
+import type { WorkflowNode, WorkflowEdge, Connection as ServiceConnection } from "../types/workflow";
+import { StepIssuesContext, StepNamesContext } from "../components/canvas/StepContexts";
+import { EMPTY_RULE } from "../components/canvas/RulesEditor";
+import { buildNames, defaultRefToken } from "../utils/stepData";
+import { issuesByNode, validateWorkflow } from "../utils/validateWorkflow";
 import CanvasNode, {
     BRANCH_HANDLE_PREFIX,
     MINIMAP_COLORS,
@@ -61,6 +65,8 @@ const nodeTypes = {
     email_trigger: CanvasNode,
     email_send: CanvasNode,
     text_transform: CanvasNode,
+    keyword_switch: CanvasNode,
+    text_assemble: CanvasNode,
 };
 
 
@@ -120,11 +126,15 @@ function defaultConfig(type: string): Record<string, any> {
                 prompt: "{input}",
             };
         case "condition":
-            return { expression: "" };
+            return { mode: "rules", match: "all", rules: [{ ...EMPTY_RULE }], expression: "" };
+        case "keyword_switch":
+            return { value: "{input}", value_mode: "auto", rules: "", default_label: "другое" };
+        case "text_assemble":
+            return { template: "" };
         case "text_input":
             return { text: "", file_name: "" };
         case "switch":
-            return { value: "{input}", cases: "" };
+            return { value: "{input}", value_mode: "auto", cases: "" };
         case "set":
             return { values: "" };
         case "schedule":
@@ -134,7 +144,7 @@ function defaultConfig(type: string): Record<string, any> {
         case "email_send":
             return { connection_id: undefined, to: "{email_from}", subject: "Re: {email_subject}", body: "", as_reply: true };
         case "text_transform":
-            return { operation: "extract_order", value: "{input}", pattern: "", max_chars: 500 };
+            return { operation: "extract_order", value: "{input}", value_mode: "auto", pattern: "", replacement: "", max_chars: 500 };
         case "webhook":
             return { test_input: "" };
         case "manual":
@@ -157,11 +167,15 @@ function toFlowNode(n: WorkflowNode, index: number): Node {
     };
 }
 
+/** Базовая толщина линии связи: стандартная в React Flow — 1 px, делаем на 0,5 px толще. */
+const EDGE_WIDTH = 1.5;
+const EDGE_WIDTH_ACTIVE = 3;
+
 /** Стиль связи по типу: tool — пунктир, ветка Condition/Switch — цвет и подпись метки. */
 function edgeStyle(kind: "tool" | "branch" | "next", label?: string) {
-    if (kind === "tool") return { stroke: "#6366f1", strokeDasharray: "4 3" };
-    if (kind === "branch") return { stroke: branchColor(label || "") };
-    return { stroke: "#3b82f6" };
+    if (kind === "tool") return { stroke: "#6366f1", strokeWidth: EDGE_WIDTH, strokeDasharray: "4 3" };
+    if (kind === "branch") return { stroke: branchColor(label || ""), strokeWidth: EDGE_WIDTH };
+    return { stroke: "#3b82f6", strokeWidth: EDGE_WIDTH };
 }
 
 function toFlowEdge(e: WorkflowEdge): Edge {
@@ -295,8 +309,8 @@ export default function WorkflowEditor() {
 
     const genId = (type: string) => {
         idCounter.current += 1;
-        // Короткий id: префикс типа + счётчик (читаемо и не вылезает из ноды)
-        const prefix = type.replace(/_/g, "").slice(0, 8);
+        // id: полное название типа + счётчик (например, condition_5)
+        const prefix = type.replace(/_/g, "");
         return `${prefix}_${idCounter.current}`;
     };
 
@@ -327,7 +341,7 @@ export default function WorkflowEditor() {
             const to = runProgress[e.target]?.status;
             const targetSkipped = to === "skipped" || (runFinished && !to);
             if (from === "done" && !targetSkipped) {
-                return { ...e, animated: true, style: { ...e.style, stroke: "#10b981", strokeWidth: 2.5 } };
+                return { ...e, animated: true, style: { ...e.style, stroke: "#10b981", strokeWidth: EDGE_WIDTH_ACTIVE } };
             }
             if (from === "skipped" || targetSkipped) {
                 return { ...e, animated: false, style: { ...e.style, opacity: 0.25 } };
@@ -438,6 +452,55 @@ export default function WorkflowEditor() {
         is_active: isActive,
     });
 
+    // ── проверка сценария и данные для подсказок ──
+    const [connections, setConnections] = useState<ServiceConnection[]>([]);
+    useEffect(() => {
+        api.getConnections().then(({ data }) => data && setConnections(data));
+    }, []);
+    const wfNodes = useMemo(
+        () => nodes.map((n): WorkflowNode => ({ id: n.id, type: n.type as WorkflowNode["type"], config: (n.data?.config as Record<string, any>) || {} })),
+        [nodes],
+    );
+    const wfEdges = useMemo(
+        () =>
+            edges.map((e): WorkflowEdge => ({
+                id: e.id,
+                from_node: e.source,
+                to_node: e.target,
+                type: e.sourceHandle === "out-tool" ? "tool" : "next",
+                condition: e.sourceHandle?.startsWith(BRANCH_HANDLE_PREFIX) ? e.sourceHandle.slice(BRANCH_HANDLE_PREFIX.length) : undefined,
+            })),
+        [edges],
+    );
+    // Поля со ссылкой на данные (режим «авто») следуют за шагом, который стоит перед текущим
+    useEffect(() => {
+        const updates = new Map<string, Record<string, any>>();
+        for (const n of wfNodes) {
+            const token = defaultRefToken(n.id, wfNodes, wfEdges);
+            if (!token) continue;
+            const cfg = n.config;
+            let next = cfg;
+            if (["text_transform", "switch", "keyword_switch"].includes(n.type) && cfg.value_mode === "auto" && cfg.value !== token) {
+                next = { ...cfg, value: token };
+            }
+            if (n.type === "condition" && Array.isArray(cfg.rules) && cfg.rules.some((r: any) => r.mode === "auto" && r.value !== token)) {
+                next = { ...cfg, rules: cfg.rules.map((r: any) => (r.mode === "auto" ? { ...r, value: token } : r)) };
+            }
+            if (next !== cfg) updates.set(n.id, next);
+        }
+        if (updates.size) {
+            setNodes((current) => current.map((n) => (updates.has(n.id) ? { ...n, data: { ...n.data, config: updates.get(n.id) } } : n)));
+        }
+    }, [wfNodes, wfEdges, setNodes]);
+    const stepNames = useMemo(() => buildNames(wfNodes), [wfNodes]);
+    const issues = useMemo(() => validateWorkflow(wfNodes, wfEdges, connections), [wfNodes, wfEdges, connections]);
+    const issueMap = useMemo(() => issuesByNode(issues), [issues]);
+    const lastRun = useMemo(() => executions.find((e) => e.logs && e.logs.length), [executions]);
+    const lastOutputs = useMemo(() => Object.fromEntries((lastRun?.logs ?? []).map((l) => [l.node_id, l.output])), [lastRun]);
+    const lastInput = String(lastRun?.trigger_data?.input ?? "");
+    /** Окно проверки: открыто вручную или перед сохранением (save — можно сохранить, несмотря на ошибки). */
+    const [checkDialog, setCheckDialog] = useState<{ beforeSave: boolean } | null>(null);
+
     const applyAiGraph = (graph: { nodes: any[]; edges: any[] }) => {
         snapshot();
         setNodes(graph.nodes.map(toFlowNode));
@@ -463,6 +526,10 @@ export default function WorkflowEditor() {
     };
 
     const handleSave = async () => {
+        if (issues.some((i) => i.level === "error")) {
+            setCheckDialog({ beforeSave: true });
+            return;
+        }
         await saveWorkflow();
     };
 
@@ -597,6 +664,16 @@ export default function WorkflowEditor() {
                             <Sparkles className="w-4 h-4" /> ИИ помощник
                         </button>
                         <button
+                            onClick={() => setCheckDialog({ beforeSave: false })}
+                            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium border border-gray-200 text-gray-600 hover:bg-gray-50"
+                        >
+                            <ShieldCheck className={`w-4 h-4 ${issues.some((i) => i.level === "error") ? "text-red-500" : issues.length ? "text-amber-500" : "text-emerald-600"}`} />
+                            Проверить
+                            {issues.length > 0 && (
+                                <span className={`rounded-full px-1.5 text-[11px] text-white ${issues.some((i) => i.level === "error") ? "bg-red-500" : "bg-amber-500"}`}>{issues.length}</span>
+                            )}
+                        </button>
+                        <button
                             onClick={() => setShowLog((v) => !v)}
                             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium border ${
                                 showLog
@@ -647,6 +724,8 @@ export default function WorkflowEditor() {
                 <div className="flex-1 flex min-h-0">
                     <div className="flex-1 relative" data-tour="canvas">
                         <RunProgressContext.Provider value={runProgress}>
+                        <StepNamesContext.Provider value={stepNames}>
+                        <StepIssuesContext.Provider value={issueMap}>
                         <ReactFlowProvider>
                             <ReactFlow
                                 nodes={nodes}
@@ -666,6 +745,7 @@ export default function WorkflowEditor() {
                                     if (runFinished) setRunProgress(null);
                                 }}
                                 deleteKeyCode={["Backspace", "Delete"]}
+                                connectionLineStyle={{ strokeWidth: EDGE_WIDTH }}
                                 minZoom={0.1}
                                 maxZoom={1.5}
                                 proOptions={{ hideAttribution: true }}
@@ -686,6 +766,8 @@ export default function WorkflowEditor() {
                                 />
                             </ReactFlow>
                         </ReactFlowProvider>
+                        </StepIssuesContext.Provider>
+                        </StepNamesContext.Provider>
                         </RunProgressContext.Provider>
 
                         {nodes.length === 0 && (
@@ -721,6 +803,11 @@ export default function WorkflowEditor() {
                                 onChange={updateSelectedConfig}
                                 onDelete={deleteSelected}
                                 onClose={() => setSelectedId(null)}
+                                allNodes={wfNodes}
+                                edges={wfEdges}
+                                lastOutputs={lastOutputs}
+                                lastInput={lastInput}
+                                issues={issueMap[selectedNode.id] ?? []}
                             />
                         )
                     )}
@@ -770,6 +857,61 @@ export default function WorkflowEditor() {
                             >
                                 Готово
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {checkDialog && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onMouseDown={() => setCheckDialog(null)}>
+                    <div className="flex max-h-[80vh] w-full max-w-lg flex-col rounded-xl bg-white shadow-2xl" onMouseDown={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-2 border-b border-gray-100 px-5 py-3">
+                            <ShieldCheck className="h-5 w-5 text-blue-600" />
+                            <h2 className="text-base font-semibold text-gray-800">Проверка сценария</h2>
+                            <button onClick={() => setCheckDialog(null)} className="ml-auto rounded p-1 text-gray-400 hover:bg-gray-50 hover:text-gray-600">
+                                <CloseIcon className="h-4 w-4" />
+                            </button>
+                        </div>
+                        <div className="flex-1 space-y-2 overflow-y-auto px-5 py-4">
+                            {issues.length === 0 ? (
+                                <p className="text-sm text-emerald-700">Проблем не найдено: все шаги заполнены и соединены.</p>
+                            ) : (
+                                issues.map((issue, i) => (
+                                    <button
+                                        key={i}
+                                        disabled={!issue.nodeId}
+                                        onClick={() => {
+                                            if (!issue.nodeId) return;
+                                            setSelectedId(issue.nodeId);
+                                            setShowAiChat(false);
+                                            setCheckDialog(null);
+                                        }}
+                                        className={`block w-full rounded-lg border px-3 py-2 text-left ${issue.level === "error" ? "border-red-200 bg-red-50" : "border-amber-200 bg-amber-50"} ${issue.nodeId ? "hover:brightness-95" : "cursor-default"}`}
+                                    >
+                                        <span className={`block text-xs font-semibold ${issue.level === "error" ? "text-red-700" : "text-amber-800"}`}>
+                                            {issue.nodeId ? stepNames[issue.nodeId] : "Сценарий"}
+                                        </span>
+                                        <span className="block text-xs text-gray-700">{issue.message}</span>
+                                        {issue.nodeId && <span className="mt-0.5 block text-[11px] text-blue-600">Перейти к шагу</span>}
+                                    </button>
+                                ))
+                            )}
+                        </div>
+                        <div className="flex justify-end gap-2 border-t border-gray-100 px-5 py-3">
+                            <button onClick={() => setCheckDialog(null)} className="rounded-lg border border-gray-200 px-4 py-1.5 text-sm text-gray-600 hover:bg-gray-50">
+                                {checkDialog.beforeSave ? "Исправить" : "Закрыть"}
+                            </button>
+                            {checkDialog.beforeSave && (
+                                <button
+                                    onClick={async () => {
+                                        setCheckDialog(null);
+                                        await saveWorkflow();
+                                    }}
+                                    className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+                                >
+                                    Всё равно сохранить
+                                </button>
+                            )}
                         </div>
                     </div>
                 </div>

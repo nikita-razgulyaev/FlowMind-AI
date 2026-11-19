@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { ChevronDown } from "lucide-react";
 import { NODE_META } from "./CanvasNode";
 import { NODE_INFO, PALETTE_TABS } from "../../utils/glossary";
@@ -27,8 +28,8 @@ const TABS: PaletteTab[] = [
     {
         id: "logic",
         groups: [
-            { label: "Ветвление", items: ["condition", "switch"] },
-            { label: "Текст и данные", items: ["text_transform", "text_input", "set"], dropdown: true },
+            { label: "Ветвление", items: ["condition", "switch", "keyword_switch"] },
+            { label: "Текст и данные", items: ["text_transform", "text_assemble", "text_input", "set"], dropdown: true },
             { label: "Результат", items: ["print"] },
         ],
     },
@@ -44,22 +45,58 @@ const TABS: PaletteTab[] = [
     },
 ];
 
-/** Всплывающая подсказка с задержкой: название, что делает и пример. */
+const BUBBLE_WIDTH = 256;
+const BUBBLE_MARGIN = 8;
+
+/** Всплывающая подсказка с задержкой: название, что делает и пример. Позиционируется по окну и не выходит за его края. */
 function HintBubble({ title, hint, example, children }: { title: string; hint: string; example?: string; children: ReactNode }) {
+    const anchorRef = useRef<HTMLDivElement>(null);
+    const bubbleRef = useRef<HTMLDivElement>(null);
+    const [visible, setVisible] = useState(false);
+    const [pos, setPos] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
+
+    const show = () => {
+        const anchor = anchorRef.current?.getBoundingClientRect();
+        if (!anchor) return;
+        const width = Math.min(BUBBLE_WIDTH, window.innerWidth - BUBBLE_MARGIN * 2);
+        // Левый край подсказки совпадает с левым краем инструмента; сдвигается влево, только если не помещается справа
+        const left = Math.max(BUBBLE_MARGIN, Math.min(anchor.left, window.innerWidth - width - BUBBLE_MARGIN));
+        setPos({ left, top: anchor.bottom + 4 });
+        setVisible(true);
+    };
+
+    // После отрисовки известна высота: если подсказка не помещается снизу, показываем её над кнопкой
+    useLayoutEffect(() => {
+        const anchor = anchorRef.current?.getBoundingClientRect();
+        const bubble = bubbleRef.current?.getBoundingClientRect();
+        if (!visible || !anchor || !bubble) return;
+        if (anchor.bottom + 4 + bubble.height > window.innerHeight - BUBBLE_MARGIN) {
+            setPos((p) => ({ ...p, top: Math.max(BUBBLE_MARGIN, anchor.top - bubble.height - 4) }));
+        }
+    }, [visible]);
+
     return (
-        <div className="group relative">
+        <div ref={anchorRef} onMouseEnter={show} onMouseLeave={() => setVisible(false)}>
             {children}
-            <div className="pointer-events-none absolute left-1/2 top-full z-40 mt-1 hidden w-64 max-w-[min(16rem,calc(100vw-2rem))] -translate-x-1/2 rounded-lg border border-gray-200 bg-white p-3 text-left shadow-xl group-hover:block group-hover:animate-[fadeIn_0.15s_ease-out_0.4s_both]">
-                <p className="text-xs font-semibold text-gray-800">{title}</p>
-                <p className="mt-1 text-xs leading-snug text-gray-600">{hint}</p>
-                {example && (
-                    <p className="mt-1.5 text-[11px] leading-snug text-gray-400">
-                        <span className="font-medium text-gray-500">Пример: </span>
-                        {example}
-                    </p>
+            {visible &&
+                createPortal(
+                <div
+                    ref={bubbleRef}
+                    style={{ left: pos.left, top: pos.top, width: Math.min(BUBBLE_WIDTH, window.innerWidth - BUBBLE_MARGIN * 2) }}
+                    className="pointer-events-none fixed z-50 animate-[fadeIn_0.15s_ease-out_0.4s_both] rounded-lg border border-gray-200 bg-white p-3 text-left shadow-xl"
+                >
+                    <p className="text-xs font-semibold text-gray-800">{title}</p>
+                    <p className="mt-1 text-xs leading-snug text-gray-600">{hint}</p>
+                    {example && (
+                        <p className="mt-1.5 text-[11px] leading-snug text-gray-400">
+                            <span className="font-medium text-gray-500">Пример: </span>
+                            {example}
+                        </p>
+                    )}
+                    <p className="mt-1.5 text-[11px] text-blue-600">Нажмите, чтобы добавить на рабочую область</p>
+                </div>,
+                document.body,
                 )}
-                <p className="mt-1.5 text-[11px] text-blue-600">Нажмите, чтобы добавить на рабочую область</p>
-            </div>
         </div>
     );
 }

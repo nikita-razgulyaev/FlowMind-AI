@@ -42,6 +42,11 @@ def _should_failover(exc: Exception) -> bool:
     return isinstance(exc, (httpx.TransportError, json.JSONDecodeError, KeyError, IndexError, TypeError))
 
 
+def _is_empty_message(message: dict) -> bool:
+    """Ни текста, ни вызовов инструментов — ответ непригоден."""
+    return not (message.get("content") or "").strip() and not message.get("tool_calls")
+
+
 def _mark_failed(name: str) -> None:
     entry = _health.setdefault(name, {"fails": 0, "until": 0.0})
     entry["fails"] += 1
@@ -118,7 +123,7 @@ class LLMProvider:
 
     async def chat(self, messages: list, model: Optional[str] = None, tools: Optional[list] = None,
                    temperature: float = 0.7, mode: Optional[str] = None, connection_id=None,
-                   json_mode: bool = False) -> dict:
+                   json_mode: bool = False, min_tokens: Optional[int] = None) -> dict:
         target = self._resolve(mode, connection_id, model)
         if target["kind"] == "ollama":
             payload = {"model": target["model"], "messages": messages, "stream": False,
@@ -132,8 +137,8 @@ class LLMProvider:
                 self._raise_for_status(r)
                 return r.json().get("message", {})
         if target["kind"] == "platform":
-            return await self._platform_chat(messages, tools, temperature, target.get("model"))
-        return await self._openai_chat(target, messages, tools, temperature)
+            return await self._platform_chat(messages, tools, temperature, target.get("model"), min_tokens)
+        return await self._openai_chat(target, messages, tools, temperature, min_tokens)
 
     # ───────── реализация ─────────
     @staticmethod
@@ -141,7 +146,8 @@ class LLMProvider:
         if r.status_code >= 400:
             raise ProviderHTTPError(r.status_code, r.text)
 
-    async def _platform_chat(self, messages: list, tools: Optional[list], temperature: float, preferred: Optional[str] = None) -> dict:
+    async def _platform_chat(self, messages: list, tools: Optional[list], temperature: float, preferred: Optional[str] = None,
+                             min_tokens: Optional[int] = None) -> dict:
         """Встроенная модель платформы: основная, а при сбое на её стороне автоматически запасные от других провайдеров."""
         if self.guard:
             await self.guard()                  # суточный лимит считается один раз на запрос, а не на каждую попытку
@@ -156,7 +162,7 @@ class LLMProvider:
             timeout = httpx.Timeout(120.0 if last else 60.0, connect=10.0)     # зависшего провайдера не ждём дольше минуты, если есть запасной
             try:
                 message = await self._post_chat(provider["base_url"], provider["api_key"], provider["model"], messages, tools,
-                                                temperature, provider.get("max_tokens", 1500), timeout)
+                                                temperature, max(provider.get("max_tokens", 1500), min_tokens or 0), timeout)
             except Exception as e:
                 if not _should_failover(e):
                     raise
@@ -164,6 +170,12 @@ class LLMProvider:
                 reason = self._short(e, [p["api_key"] for p in chain])
                 failures.append(f"{provider['name']}: {reason}")
                 log.warning("Модель платформы «%s» не ответила (%s), переключаемся на следующую", provider["name"], reason)
+                continue
+            if _is_empty_message(message):
+                # модель-«рассуждатель» могла потратить весь лимит токенов на размышления и не вернуть текст: пробуем следующую
+                _mark_failed(provider["name"])
+                failures.append(f"{provider['name']}: пустой ответ")
+                log.warning("Модель платформы «%s» вернула пустой ответ, переключаемся на следующую", provider["name"])
                 continue
             _mark_ok(provider["name"])
             if provider is not chain_main:
@@ -179,14 +191,15 @@ class LLMProvider:
             text = text.replace(secret, "***")
         return text[:120]
 
-    async def _openai_chat(self, target: dict, messages: list, tools: Optional[list], temperature: float) -> dict:
+    async def _openai_chat(self, target: dict, messages: list, tools: Optional[list], temperature: float,
+                           min_tokens: Optional[int] = None) -> dict:
         """Запрос через подключение пользователя (его ключ и его провайдер): запасных моделей платформы здесь нет намеренно."""
         api_key = target.get("api_key")
         if not api_key:
             raise ValueError("У подключения не задан API Key")
         base_url = target["base_url"].rstrip("/")
         await assert_public_url(base_url)
-        return await self._post_chat(base_url, api_key, target["model"], messages, tools, temperature, None, httpx.Timeout(120.0, connect=10.0))
+        return await self._post_chat(base_url, api_key, target["model"], messages, tools, temperature, min_tokens, httpx.Timeout(120.0, connect=10.0))
 
     async def _post_chat(self, base_url: str, api_key: str, model: str, messages: list, tools: Optional[list], temperature: float,
                          max_tokens: Optional[int], timeout: httpx.Timeout) -> dict:

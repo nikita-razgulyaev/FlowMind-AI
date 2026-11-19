@@ -117,7 +117,7 @@ export default function Settings() {
 
                         <div>
                             <label className={label}>
-                                Temperature по умолчанию:{" "}
+                                Креативность ответов по умолчанию:{" "}
                                 {settings.defaultTemperature}
                             </label>
                             <input
@@ -135,6 +135,10 @@ export default function Settings() {
                                 }
                                 className="w-full"
                             />
+                            <div className="flex justify-between text-[11px] text-gray-400">
+                                <span>Точнее</span>
+                                <span>Свободнее</span>
+                            </div>
                         </div>
                     </div>
 

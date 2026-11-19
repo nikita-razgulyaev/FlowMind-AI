@@ -1,5 +1,6 @@
 """Преобразования текста для ноды «Обработка текста»: поиск контактов и номеров, очистка. Без нейросети — быстро и предсказуемо."""
 import re
+from datetime import datetime
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 INTL_PHONE_RE = re.compile(r"\+\d[\d\s\-()]{8,16}\d")
@@ -30,6 +31,13 @@ OPERATIONS = {
     "lower": "Строчные буквы",
     "upper": "ЗАГЛАВНЫЕ буквы",
     "trim": "Убрать лишние пробелы",
+    "replace": "Заменить текст",
+    "capitalize": "Первая буква заглавная",
+    "title_case": "Каждое слово с заглавной буквы",
+    "extract_number": "Найти число",
+    "one_line": "Склеить в одну строку",
+    "today": "Сегодняшняя дата",
+    "now": "Текущие дата и время",
 }
 
 
@@ -94,7 +102,7 @@ def clean_email_text(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
-def apply_operation(operation: str, text: str, pattern: str = "", max_chars: int = 500) -> str:
+def apply_operation(operation: str, text: str, pattern: str = "", max_chars: int = 500, replacement: str = "") -> str:
     text = text if isinstance(text, str) else str(text)
     if operation == "extract_email":
         m = EMAIL_RE.search(text)
@@ -135,4 +143,19 @@ def apply_operation(operation: str, text: str, pattern: str = "", max_chars: int
         return text.upper()
     if operation == "trim":
         return re.sub(r"[ \t]+", " ", text).strip()
+    if operation == "replace":
+        return text.replace(pattern, replacement) if pattern else text
+    if operation == "capitalize":
+        stripped = text.strip()
+        return stripped[:1].upper() + stripped[1:]
+    if operation == "title_case":
+        return " ".join(word[:1].upper() + word[1:].lower() for word in text.split())
+    if operation == "extract_number":
+        m = re.search(r"-?\d[\d\s]*(?:[.,]\d+)?", text)
+        return re.sub(r"\s", "", m.group(0)).replace(",", ".") if m else ""
+    if operation == "one_line":
+        return re.sub(r"\s+", " ", text).strip()
+    if operation in ("today", "now"):
+        moment = datetime.now()      # время сервера
+        return moment.strftime("%d.%m.%Y" if operation == "today" else "%d.%m.%Y %H:%M")
     return f"Text Error: неизвестное действие «{operation}»"

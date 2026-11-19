@@ -16,6 +16,7 @@ from ..services import telegram_service
 from ..services.limits import QuotaError, check_workflow_quota, get_user_plan, workflow_flags
 from ..services.runner import cancel_task, create_execution, get_progress, run_workflow, start_in_background
 from ..templates import TEMPLATES
+from ..worker import WorkflowEngine
 
 router = APIRouter(tags=["workflows"])
 
@@ -222,6 +223,39 @@ async def cancel_execution(execution_id: int, user: User = Depends(get_current_u
         execution.finished_at = utcnow()
         await db.commit()
     return {"status": execution.status}
+
+
+# ───────── проверка одного шага ─────────
+
+# Шаги, которые можно проверить без побочных эффектов: ничего не отправляют наружу и не тратят лимит нейросети
+TESTABLE_NODE_TYPES = {"text_transform", "condition", "switch", "keyword_switch", "set", "text_input", "text_assemble", "print", "http"}
+MAX_TEST_CONTEXT_CHARS = 200_000
+
+
+class NodeTestRequest(BaseModel):
+    node: Dict[str, Any]
+    input: str = ""
+    context: Dict[str, Any] = {}
+
+
+@router.post("/workflows/test-node")
+async def test_node(data: NodeTestRequest, user: User = Depends(get_current_user)):
+    """Выполняет один шаг на тестовых данных: {input} и результаты других шагов (из прошлого запуска) передаёт клиент."""
+    node = data.node
+    node_type = node.get("type")
+    config = node.get("config") if isinstance(node.get("config"), dict) else {}
+    if node_type not in TESTABLE_NODE_TYPES:
+        raise HTTPException(400, detail={"code": "not_testable", "message": "Этот шаг отправляет данные наружу или использует нейросеть, поэтому проверяется только при запуске сценария"})
+    if node_type == "http" and str(config.get("method", "GET")).upper() != "GET":
+        raise HTTPException(400, detail={"code": "not_testable", "message": "Проверка доступна только для запросов GET: другие запросы могут изменить данные в сервисе"})
+    if len(str(data.context)) > MAX_TEST_CONTEXT_CHARS:
+        raise HTTPException(400, detail={"code": "context_too_large", "message": "Слишком много тестовых данных"})
+    step = {"id": str(node.get("id") or "test"), "type": node_type, "config": config}
+    engine = WorkflowEngine({"nodes": [step], "edges": []}, 0)
+    engine.context = {**data.context, "input": data.input}
+    output = await engine._execute_node(step, {"input": data.input})
+    engine._register_branch(step, output)
+    return {"output": output, "branch": engine.branches.get(step["id"])}
 
 
 # ───────── шаблоны ─────────

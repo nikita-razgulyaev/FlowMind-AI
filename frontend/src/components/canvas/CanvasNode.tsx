@@ -1,6 +1,8 @@
 import { createContext, useContext, useEffect } from "react";
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 import { NODE_INFO } from "../../utils/glossary";
+import { humanizeText } from "../../utils/stepData";
+import { StepIssuesContext, StepNamesContext } from "./StepContexts";
 import {
     Play,
     Clock,
@@ -20,6 +22,9 @@ import {
     Mail,
     MailPlus,
     ScanText,
+    Tags,
+    TextQuote,
+    AlertTriangle,
     Check,
     Loader2,
     X,
@@ -57,10 +62,19 @@ export function parseCases(raw: unknown): string[] {
         .filter(Boolean);
 }
 
+/** Категории из строк «категория: слово, слово». */
+export function parseKeywordCategories(raw: unknown): string[] {
+    return String(raw ?? "")
+        .split("\n")
+        .map((line) => (line.includes(":") ? line.split(":")[0].trim() : ""))
+        .filter(Boolean);
+}
+
 /** Выходные ветки ноды: Condition — true/false, Switch — cases + default. */
 export function getBranches(type: string, config: Record<string, any>): string[] {
     if (type === "condition") return ["true", "false"];
     if (type === "switch") return [...parseCases(config.cases), "default"];
+    if (type === "keyword_switch") return [...parseKeywordCategories(config.rules), String(config.default_label || "другое").trim()];
     return [];
 }
 
@@ -81,6 +95,8 @@ export const MINIMAP_COLORS: Record<string, string> = {
     agent: "#6366f1",
     condition: "#eab308",
     switch: "#f59e0b",
+    keyword_switch: "#ea580c",
+    text_assemble: "#84cc16",
     set: "#14b8a6",
     text_input: "#64748b",
     print: "#6b7280",
@@ -181,6 +197,18 @@ export const NODE_META: Record<
         badge: "bg-teal-100 text-teal-700",
         ring: "border-teal-200",
     },
+    keyword_switch: {
+        label: "По ключевым словам",
+        icon: Tags,
+        badge: "bg-orange-100 text-orange-700",
+        ring: "border-orange-200",
+    },
+    text_assemble: {
+        label: "Собрать текст",
+        icon: TextQuote,
+        badge: "bg-lime-100 text-lime-700",
+        ring: "border-lime-200",
+    },
     google_calendar_create_event: {
         label: "Google Calendar",
         icon: CalendarPlus,
@@ -227,6 +255,13 @@ const OPERATION_LABELS: Record<string, string> = {
     lower: "строчные буквы",
     upper: "ЗАГЛАВНЫЕ буквы",
     trim: "убрать лишние пробелы",
+    replace: "заменить текст",
+    capitalize: "первая буква заглавная",
+    title_case: "слова с заглавной буквы",
+    extract_number: "найти число",
+    one_line: "склеить в одну строку",
+    today: "сегодняшняя дата",
+    now: "текущие дата и время",
 };
 
 function preview(type: string, config: Record<string, any>): string {
@@ -241,7 +276,15 @@ function preview(type: string, config: Record<string, any>): string {
                 "Не указан адрес"
             );
         case "condition":
+            if (config.mode === "rules") {
+                const rules = Array.isArray(config.rules) ? config.rules.length : 0;
+                return rules ? `правил: ${rules} (${config.match === "any" ? "любое" : "все"})` : "добавьте правила";
+            }
             return config.expression || "True";
+        case "keyword_switch":
+            return config.value || "{input}";
+        case "text_assemble":
+            return config.template || "Введите шаблон текста";
         case "text_input":
             return config.file_name || config.text || "Вставьте текст или загрузите файл";
         case "switch":
@@ -279,7 +322,11 @@ export default function CanvasNode({ id, type, data, selected }: NodeProps) {
     const meta = NODE_META[type as string] ?? NODE_META.print;
     const Icon = meta.icon;
     const config = (data?.config as Record<string, any>) || {};
-    const text = preview(type as string, config);
+    const names = useContext(StepNamesContext);
+    const issues = useContext(StepIssuesContext)[id] ?? [];
+    const text = humanizeText(preview(type as string, config), names);
+    const title = names[id] || meta.label;
+    const worst = issues.some((i) => i.level === "error") ? "error" : issues.length ? "warning" : null;
     const isTrigger =
         type === "manual" || type === "schedule" || type === "telegram_trigger" || type === "webhook" || type === "email_trigger";
     const isAgent = type === "agent";
@@ -323,9 +370,17 @@ export default function CanvasNode({ id, type, data, selected }: NodeProps) {
                 >
                     <Icon className="w-4 h-4" />
                 </span>
-                <span className="shrink-0 whitespace-nowrap text-sm font-semibold text-gray-800 max-w-[55%] truncate" title={meta.label}>
-                    {meta.label}
+                <span className="shrink-0 whitespace-nowrap text-sm font-semibold text-gray-800 max-w-[55%] truncate" title={title}>
+                    {title}
                 </span>
+                {worst && (
+                    <span
+                        title={issues.map((i) => i.message).join("\n")}
+                        className={`shrink-0 ${worst === "error" ? "text-red-500" : "text-amber-500"}`}
+                    >
+                        <AlertTriangle className="w-4 h-4" />
+                    </span>
+                )}
                 <span
                     title={id}
                     className="ml-auto min-w-0 max-w-[40%] truncate text-[10px] font-mono text-gray-400 pr-0.5"

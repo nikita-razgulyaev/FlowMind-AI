@@ -9,6 +9,8 @@ export interface WorkflowNode {
         | "text_transform"
         | "webhook"
         | "switch"
+        | "keyword_switch"
+        | "text_assemble"
         | "set"
         | "text_input"
         | "llm"

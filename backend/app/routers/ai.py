@@ -54,22 +54,29 @@ async def chat(data: ChatIn, user: User = Depends(get_current_user), db: AsyncSe
     system = assistant.build_system_prompt(data.workflow, public)
     history = [{"role": m.role, "content": m.content} for m in data.messages[-assistant.MAX_HISTORY:]]
     llm = LLMProvider(connections=connections, guard=platform_guard)
+    messages = [{"role": "system", "content": system}, *history]
+    mode = settings.default_llm_mode if not data.connection_id else "cloud"
+    text = ""
     try:
-        message = await llm.chat(
-            [{"role": "system", "content": system}, *history], model=data.model, temperature=0.2,
-            mode=settings.default_llm_mode if not data.connection_id else "cloud",
-            connection_id=data.connection_id, json_mode=True,
-        )
+        for _ in range(2):                  # пустой ответ (модель ушла в рассуждения и не вернула текст) — один повтор
+            message = await llm.chat(
+                messages, model=data.model, temperature=0.2, mode=mode, connection_id=data.connection_id,
+                json_mode=True, min_tokens=assistant.MIN_REPLY_TOKENS,
+            )
+            text = (message.get("content") or "").strip()
+            if text:
+                break
     except AIUnavailable as e:
         raise HTTPException(503, detail={"code": "ai_unavailable", "message": str(e)})
     except Exception as e:
         raise HTTPException(502, detail={"code": "llm_error", "message": f"Ошибка языковой модели: {e}"})
 
     await bump_usage(db, user.id, "ai_chat")
-    text = message.get("content") or ""
+    if not text:
+        raise HTTPException(502, detail={"code": "llm_empty", "message": "Модель не смогла сформировать ответ. Попробуйте переформулировать запрос или повторить его."})
     parsed = assistant.extract_json(text)
     if parsed is None:
-        return {"reply": text.strip() or "Модель вернула пустой ответ", "workflow": None}
+        return {"reply": text, "workflow": None}
     workflow = assistant.sanitize_workflow(parsed.get("workflow"), data.workflow, public)
     reply = parsed.get("reply") if isinstance(parsed.get("reply"), str) else ""
     if parsed.get("workflow") and workflow is None:
