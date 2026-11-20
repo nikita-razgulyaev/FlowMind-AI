@@ -1,4 +1,4 @@
-# Один образ: собранный фронтенд + backend (раздаёт и API, и сайт).
+# Один образ: собранный фронтенд + документация + backend (раздаёт и API, и сайт).
 
 # ── 1. сборка фронтенда ──
 FROM node:22-alpine AS frontend
@@ -8,7 +8,15 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-# ── 2. рабочий образ ──
+# ── 2. сборка документации (VitePress) ──
+FROM node:22-alpine AS docs
+WORKDIR /build
+COPY docs/package.json docs/package-lock.json ./
+RUN npm ci
+COPY docs/ ./
+RUN npm run build
+
+# ── 3. рабочий образ ──
 FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 STATIC_DIR=/app/static
 WORKDIR /app
@@ -18,6 +26,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/ .
 COPY --from=frontend /build/dist ./static
+# документация (VitePress) раздаётся по адресу /help/
+COPY --from=docs /build/.vitepress/dist ./static/help
 
 RUN useradd --create-home --uid 10001 app && mkdir /data && chown app /data
 USER app

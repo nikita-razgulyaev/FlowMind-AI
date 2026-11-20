@@ -1,5 +1,7 @@
-/** Знак FlowMind AI: ветвление (один вход → три результата), вариант 1. */
+/** Знак FlowMind AI: ветвление (один вход → три результата) с градиентом, как в документации. */
 export default function LogoIcon({ className = "w-5 h-5" }: { className?: string }) {
+    // Уникальный id градиента, чтобы несколько иконок на странице не конфликтовали
+    const gid = "fm-logo-g";
     return (
         <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -7,7 +9,13 @@ export default function LogoIcon({ className = "w-5 h-5" }: { className?: string
             className={className}
             aria-hidden
         >
-            <rect width="64" height="64" rx="16" fill="currentColor" />
+            <defs>
+                <linearGradient id={gid} x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+                    <stop stopColor="#2563eb" />
+                    <stop offset="1" stopColor="#06b6d4" />
+                </linearGradient>
+            </defs>
+            <rect width="64" height="64" rx="16" fill={`url(#${gid})`} />
             <g
                 stroke="#fff"
                 strokeWidth="3.4"

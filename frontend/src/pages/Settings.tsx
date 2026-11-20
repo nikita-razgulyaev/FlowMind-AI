@@ -47,8 +47,7 @@ export default function Settings() {
                         Дефолты, которые подставляются при добавлении новых
                         шагов «Нейросеть» и «ИИ-агент» на рабочей области.
                     </p>
-
-                    <div className="bg-blue-50 border border-blue-200 text-blue-800 text-xs rounded-lg px-4 py-3 mb-6">
+<div className="bg-blue-50 border border-blue-200 text-blue-800 text-xs rounded-lg px-4 py-3 mb-6">
                         {isCloud ? (
                             <>Настройки сохраняются в вашем аккаунте и действуют на всех устройствах. В облачной версии доступны облачные модели.</>
                         ) : (

@@ -336,7 +336,7 @@ function ConnectionCard({
                         ))}
                     </div>
                 )}
-                {provider?.usedFor && <p className="text-[11px] text-indigo-500 mt-2">Используется для: {provider.usedFor}</p>}
+                {provider?.usedFor && <p className="text-[11px] text-indigo-500 mt-2">Пример использования: {provider.usedFor}</p>}
             </div>
             <button
                 onClick={() => onDelete(conn.id)}

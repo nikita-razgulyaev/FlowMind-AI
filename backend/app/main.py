@@ -5,7 +5,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import settings
@@ -87,10 +87,24 @@ if settings.static_dir and Path(settings.static_dir).is_dir():
     STATIC = Path(settings.static_dir).resolve()
     if (STATIC / "assets").is_dir():
         app.mount("/assets", StaticFiles(directory=STATIC / "assets"), name="assets")
+    if (STATIC / "help" / "index.html").is_file():          # документация (VitePress): /help/
+        # /help и /help/ сразу в справочник (отдельной «главной» нет)
+        @app.get("/help", include_in_schema=False)
+        async def help_redirect():
+            return RedirectResponse(url="/help/guide/", status_code=307)
+
+        @app.get("/help/", include_in_schema=False)
+        async def help_index_redirect():
+            return RedirectResponse(url="/help/guide/", status_code=307)
+
+        app.mount("/help", StaticFiles(directory=STATIC / "help", html=True), name="help")
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa(full_path: str):
         if full_path.startswith("api/"):
+            raise HTTPException(404, "Not found")
+        # документация обслуживается mount /help — не отдаём React на эти пути
+        if full_path == "help" or full_path.startswith("help/"):
             raise HTTPException(404, "Not found")
         candidate = (STATIC / full_path).resolve()
         if full_path and candidate.is_file() and STATIC in candidate.parents:

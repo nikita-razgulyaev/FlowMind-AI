@@ -67,8 +67,11 @@ export default function PublicHeader() {
                             {item.label}
                         </Link>
                     ))}
+                    <a href="/help/guide/" target="_blank" rel="noopener" className={linkClass(false)}>
+                        Документация
+                    </a>
                 </nav>
-                <div className="ml-auto hidden md:flex items-center gap-2">{actions}</div>
+                <div className="ml-auto hidden md:flex items-center gap-1">{actions}</div>
                 <button
                     className="ml-auto md:hidden p-2 -mr-2 text-gray-600"
                     onClick={() => setOpen((v) => !v)}
@@ -84,8 +87,9 @@ export default function PublicHeader() {
                         {nav.map((item) => (
                             <Link key={item.to} to={item.to} onClick={(e) => handleNavClick(e, item.to)} className={linkClass(item.active)}>{item.label}</Link>
                         ))}
+                        <a href="/help/guide/" target="_blank" rel="noopener" className={linkClass(false)}>Документация</a>
                     </nav>
-                    <div className="flex gap-2">{actions}</div>
+                    <div className="flex gap-2 items-center">{actions}</div>
                 </div>
             )}
         </header>

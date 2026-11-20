@@ -43,13 +43,13 @@ function FlowIllustration() {
         return (
             <div
                 key={name}
-                className={`absolute flex items-center gap-2 rounded-xl border-2 bg-white px-3 shadow-md min-w-0 overflow-hidden ${meta.ring}`}
+                className={`absolute flex items-center gap-2 rounded-xl border-2 bg-white- px-3 shadow-md min-w-0 overflow-hidden ${meta.ring}`}
                 style={{ left: x, top: y, width: w, height: NODE_H }}
             >
                 <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${meta.badge}`}>
                     <Icon className="h-4 w-4" />
                 </span>
-                <span className="truncate text-[13px] font-semibold" title={name}>{name}</span>
+                <span className="truncate text-[13px] font-semibold text-gray-900-[rgba(255,255,245,0.86)]" title={name}>{name}</span>
             </div>
         );
     };
@@ -87,11 +87,11 @@ export default function Landing() {
         <div className="bg-white text-gray-900">
             <PublicHeader />
 
-            <section className="bg-gradient-to-b from-slate-50 via-blue-50/60 to-white">
+            <section className="bg-gradient-to-b from-slate-50 via-blue-50/60 to-white---">
                 <div className="max-w-6xl mx-auto px-6 pt-16 pb-20 grid lg:grid-cols-2 gap-12 items-center">
                     <div>
-                        <span className="inline-block text-xs font-semibold tracking-wide uppercase text-blue-700 bg-blue-100 rounded-full px-3 py-1">{t("landing.badge")}</span>
-                        <h1 className="mt-5 text-4xl sm:text-5xl font-extrabold leading-tight">{t("landing.heroTitle")}</h1>
+                        <span className="inline-block text-xs font-semibold tracking-wide uppercase text-blue-700 bg-blue-100-blue-200-[rgba(96,165,250,0.16)] rounded-full px-3 py-1">{t("landing.badge")}</span>
+                        <h1 className="mt-5 text-4xl sm:text-5xl font-extrabold leading-tight text-gray-900">{t("landing.heroTitle")}</h1>
                         <p className="mt-5 text-lg text-gray-600 max-w-xl">{t("landing.heroText")}</p>
                         <div className="mt-8 flex flex-wrap gap-3">
                             <Link to={me ? "/" : "/register"}>
@@ -105,7 +105,7 @@ export default function Landing() {
             </section>
 
             <section id="features" className="scroll-mt-20 max-w-6xl mx-auto px-6 py-20">
-                <h2 className="text-3xl font-extrabold text-center">{t("landing.featuresTitle")}</h2>
+                <h2 className="text-3xl font-extrabold text-center text-gray-900">{t("landing.featuresTitle")}</h2>
                 <div className="mt-12 grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
                     {FEATURES.map(({ key, icon: Icon, color }) => (
                         <div key={key} className="rounded-2xl border border-gray-200 p-6 hover:shadow-md transition-shadow">
@@ -119,7 +119,7 @@ export default function Landing() {
 
             <section id="how" className="scroll-mt-20 bg-gray-50">
                 <div className="max-w-6xl mx-auto px-6 py-20">
-                    <h2 className="text-3xl font-extrabold text-center">{t("landing.howTitle")}</h2>
+                    <h2 className="text-3xl font-extrabold text-center text-gray-900">{t("landing.howTitle")}</h2>
                     <ol className="mt-12 grid md:grid-cols-3 gap-8">
                         {[1, 2, 3].map((n) => (
                             <li key={n} className="relative bg-white rounded-2xl border border-gray-200 p-6">
@@ -133,7 +133,7 @@ export default function Landing() {
             </section>
 
             <section className="max-w-6xl mx-auto px-6 py-20">
-                <h2 className="text-3xl font-extrabold text-center">{t("landing.deployTitle")}</h2>
+                <h2 className="text-3xl font-extrabold text-center text-gray-900">{t("landing.deployTitle")}</h2>
                 <p className="mt-3 text-center text-gray-500 max-w-2xl mx-auto">{t("landing.deployText")}</p>
                 <div className="mt-12 grid md:grid-cols-2 gap-6">
                     <div className="rounded-2xl border border-gray-200 p-6">
@@ -152,14 +152,14 @@ export default function Landing() {
 
             <section id="pricing" className="scroll-mt-20 bg-gray-50">
                 <div className="max-w-6xl mx-auto px-6 py-20">
-                    <h2 className="text-3xl font-extrabold text-center">{t("pricing.title")}</h2>
+                    <h2 className="text-3xl font-extrabold text-center text-gray-900">{t("pricing.title")}</h2>
                     <p className="mt-3 text-center text-gray-500">{t("pricing.subtitle")}</p>
                     <div className="mt-12"><PricingCards plans={plans} onSelect={select} /></div>
                 </div>
             </section>
 
             <section id="faq" className="scroll-mt-20 max-w-3xl mx-auto px-6 py-20">
-                <h2 className="text-3xl font-extrabold text-center">{t("landing.faqTitle")}</h2>
+                <h2 className="text-3xl font-extrabold text-center text-gray-900">{t("landing.faqTitle")}</h2>
                 <div className="mt-10 divide-y divide-gray-200 border-y border-gray-200">
                     {FAQ_KEYS.map((key) => (
                         <details key={key} className="group py-4">

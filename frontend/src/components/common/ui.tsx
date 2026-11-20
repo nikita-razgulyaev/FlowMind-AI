@@ -3,9 +3,9 @@ import { Loader2 } from "lucide-react";
 
 const BUTTON_VARIANTS = {
     primary: "bg-blue-600 text-white hover:bg-blue-700",
-    secondary: "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50",
+    secondary: "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50-[#202127]-[rgba(255,255,245,0.86)]-[#2e2e32]:bg-[#2e2e32]",
     danger: "bg-red-600 text-white hover:bg-red-700",
-    ghost: "text-gray-600 hover:bg-gray-100",
+    ghost: "text-gray-600 hover:bg-gray-100-[rgba(235,235,245,0.6)]:bg-[#202127]",
     success: "bg-emerald-600 text-white hover:bg-emerald-700",
 };
 

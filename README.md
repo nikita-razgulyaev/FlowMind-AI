@@ -58,6 +58,7 @@ FlowMind AI — no-code редактор для сборки AI-агентов �
 - **Оплата:** встроенная имитация для демо (тестовые карты, 3-D Secure, отказы) и готовая интеграция с ЮKassa.
 - **Админ-панель:** статистика и выручка, пользователи, ручная выдача тарифов, редактирование тарифов и лимитов, платежи, рубильник и суточный потолок AI-ключа сервиса, журнал действий.
 - **Лендинг** с описанием, тарифами и FAQ.
+- **Документация.** Встроенный сайт документации на VitePress (исходники в папке [`docs`](docs): руководство, справочник по шагам, установка, API, безопасность) открывается по адресу `/help/`. Ссылки на неё есть на странице о сервисе и в боковой панели редактора (значок с книгами). Для разработки: `cd docs && npm install && npm run dev` (порт 5174, dev-сервер фронтенда проксирует `/help` на него).
 
 ## Два режима: облако и локально
 
@@ -395,14 +396,18 @@ FlowMind-AI/
 │       ├── i18n/                # словарь интерфейса
 │       ├── components/          # canvas/, auth/, billing/, common/, LogoIcon.tsx
 │       └── pages/               # Landing, Login, Register, Pricing, Checkout, Account, admin/, WorkflowEditor, ...
-│   └── public/                  # favicon.svg (знак «ветвление»), logo-variants.svg, icons.svg
+│   └── public/                  # favicon.svg (знак «ветвление»), logo-variants.svg
 ├── deploy/Caddyfile
-├── Dockerfile                   # фронтенд + backend в одном образе
+├── Dockerfile                   # фронтенд + документация + backend в одном образе
 ├── docker-compose.yml           # локально: приложение + Ollama
 ├── docker-compose.prod.yml      # сервер: приложение + PostgreSQL + Caddy (HTTPS)
 ├── render.yaml                  # Render Blueprint
 ├── .env.prod.example
-└── docs/
+└── docs/                        # сайт документации (VitePress) → /help/
+    ├── guide/                   # руководство пользователя
+    ├── steps/                   # справочник по шагам
+    ├── admin/                   # установка, конфигурация, API, безопасность
+    └── .vitepress/
 ```
 
 

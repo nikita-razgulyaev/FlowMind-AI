@@ -1,6 +1,6 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useState } from "react";
-import { GraduationCap, Workflow, History, FileText, Plug, Settings, UserCircle, ShieldCheck, LogOut, CreditCard, Info } from "lucide-react";
+import { GraduationCap, Library, Workflow, History, FileText, Plug, Settings, UserCircle, ShieldCheck, LogOut, CreditCard, Info } from "lucide-react";
 import { useAuth } from "../../store/auth";
 import TutorialModal from "../tutorial/TutorialModal";
 import ConfirmDialog from "../ConfirmDialog";
@@ -42,6 +42,16 @@ export default function EditorSidebar() {
             >
                 <GraduationCap className="w-[18px] h-[18px]" />
             </button>
+            <a
+                href="/help/guide/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className={linkClass(false)}
+                title="Документация (откроется в новой вкладке)"
+                aria-label="Документация"
+            >
+                <Library className="w-[18px] h-[18px]" />
+            </a>
             {showAccount && (
                 <>
                     <Link to="/pricing" className={linkClass(location.pathname === "/pricing")} title="Тарифы">
