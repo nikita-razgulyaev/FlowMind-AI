@@ -9,7 +9,8 @@ export default defineConfig({
     head: [["link", { rel: "icon", href: "/help/logo.svg" }]],
     cleanUrls: false,
     srcExclude: ["README.md"],
-    ignoreDeadLinks: [/^https?:\/\/localhost/],
+    // /help/... — абсолютные URL редиректа с корневой страницы документации (base уже /help/)
+    ignoreDeadLinks: [/^https?:\/\/localhost/, /^\/help\//],
     appearance: false,
 
     themeConfig: {

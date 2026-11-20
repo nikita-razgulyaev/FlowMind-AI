@@ -42,6 +42,32 @@ import { getSettings } from "../utils/settings";
 import TutorialModal from "../components/tutorial/TutorialModal";
 import InteractiveTour, { TOUR_ACTIVE_KEY } from "../components/tutorial/InteractiveTour";
 import { markTourSeen, tourSeen } from "../utils/tour";
+import ConfirmDialog from "../components/ConfirmDialog";
+
+/** Снимок сценария для сравнения «есть ли несохранённые изменения». */
+function workflowFingerprint(
+    name: string,
+    description: string,
+    nodes: Node[],
+    edges: Edge[],
+): string {
+    return JSON.stringify({
+        name,
+        description,
+        nodes: nodes.map((n) => ({
+            id: n.id,
+            type: n.type,
+            config: n.data?.config ?? {},
+            position: n.position,
+        })),
+        edges: edges.map((e) => ({
+            id: e.id,
+            source: e.source,
+            target: e.target,
+            sourceHandle: e.sourceHandle ?? null,
+        })),
+    });
+}
 
 const RESUME_WINDOW_MS = 15 * 60 * 1000;   // запуск старше 15 минут считаем потерянным и не подхватываем
 const LISTENER_TYPES = ["telegram_trigger", "webhook", "schedule", "email_trigger"];
@@ -223,11 +249,15 @@ export default function WorkflowEditor() {
     const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
     const lastConfigEdit = useRef({ id: "", at: 0 });
+    /** Отпечаток последнего сохранённого (или загруженного) состояния — для isDirty. */
+    const savedFingerprint = useRef<string>(workflowFingerprint("", "", [], []));
+    const [leaveDialog, setLeaveDialog] = useState<{ proceed: () => void } | null>(null);
     const { snapshot, reset: resetHistory } = useGraphHistory(nodes, edges, (prevNodes, prevEdges) => {
         setNodes(prevNodes);
         setEdges(prevEdges);
         setSelectedId((current) => (prevNodes.some((n) => n.id === current) ? current : null));
     });
+    const isDirty = workflowFingerprint(name, description, nodes, edges) !== savedFingerprint.current;
 
     const handleNodesChange: typeof onNodesChange = (changes) => {
         if (changes.some((c) => c.type === "remove")) snapshot();
@@ -299,11 +329,16 @@ export default function WorkflowEditor() {
             setName(data.name);
             setDescription(data.description);
             setIsActive(data.is_active);
-            setNodes(data.nodes.map(toFlowNode));
+            const flowNodes = data.nodes.map(toFlowNode);
+            setNodes(flowNodes);
             resetHistory();
             // edges после nodes: handles должны успеть смонтироваться
             const mapped = (data.edges || []).map(toFlowEdge);
-            requestAnimationFrame(() => setEdges(mapped));
+            requestAnimationFrame(() => {
+                setEdges(mapped);
+                // фиксируем «чистое» состояние после полной загрузки
+                savedFingerprint.current = workflowFingerprint(data.name, data.description, flowNodes, mapped);
+            });
         }
     };
 
@@ -493,13 +528,23 @@ export default function WorkflowEditor() {
         }
     }, [wfNodes, wfEdges, setNodes]);
     const stepNames = useMemo(() => buildNames(wfNodes), [wfNodes]);
-    const issues = useMemo(() => validateWorkflow(wfNodes, wfEdges, connections), [wfNodes, wfEdges, connections]);
-    const issueMap = useMemo(() => issuesByNode(issues), [issues]);
+    /** Результаты проверки показываются только после нажатия «Проверить» (или перед сохранением). */
+    const [validatedIssues, setValidatedIssues] = useState<ReturnType<typeof validateWorkflow>>([]);
+    const issueMap = useMemo(() => issuesByNode(validatedIssues), [validatedIssues]);
     const lastRun = useMemo(() => executions.find((e) => e.logs && e.logs.length), [executions]);
     const lastOutputs = useMemo(() => Object.fromEntries((lastRun?.logs ?? []).map((l) => [l.node_id, l.output])), [lastRun]);
     const lastInput = String(lastRun?.trigger_data?.input ?? "");
     /** Окно проверки: открыто вручную или перед сохранением (save — можно сохранить, несмотря на ошибки). */
     const [checkDialog, setCheckDialog] = useState<{ beforeSave: boolean } | null>(null);
+
+    const runValidation = useCallback(() => {
+        return validateWorkflow(wfNodes, wfEdges, connections);
+    }, [wfNodes, wfEdges, connections]);
+
+    // При изменении графа сбрасываем результаты прошлой проверки, чтобы индикаторы не «залипали»
+    useEffect(() => {
+        setValidatedIssues([]);
+    }, [wfNodes, wfEdges, connections]);
 
     const applyAiGraph = (graph: { nodes: any[]; edges: any[] }) => {
         snapshot();
@@ -521,11 +566,38 @@ export default function WorkflowEditor() {
             alert(`Error: ${error}`);
             return false;
         }
+        // считаем текущее состояние сохранённым
+        savedFingerprint.current = workflowFingerprint(name, description, nodes, edges);
         if (data && !isEditing) navigate(`/workflow/${data.id}`);
         return true;
     };
 
+    /** Перед уходом со страницы: если есть несохранённые изменения — показать предупреждение. */
+    const requestLeave = useCallback(
+        (proceed: () => void) => {
+            if (!isDirty) {
+                proceed();
+                return;
+            }
+            setLeaveDialog({ proceed });
+        },
+        [isDirty],
+    );
+
+    // Предупреждение браузера при закрытии/обновлении вкладки с несохранёнными изменениями
+    useEffect(() => {
+        if (!isDirty) return;
+        const onBeforeUnload = (e: BeforeUnloadEvent) => {
+            e.preventDefault();
+            e.returnValue = "";
+        };
+        window.addEventListener("beforeunload", onBeforeUnload);
+        return () => window.removeEventListener("beforeunload", onBeforeUnload);
+    }, [isDirty]);
+
     const handleSave = async () => {
+        const issues = runValidation();
+        setValidatedIssues(issues);
         if (issues.some((i) => i.level === "error")) {
             setCheckDialog({ beforeSave: true });
             return;
@@ -616,7 +688,7 @@ export default function WorkflowEditor() {
 
     return (
         <div className="flex h-screen">
-            <EditorSidebar />
+            <EditorSidebar onLeaveRequest={requestLeave} />
             <div className="flex-1 flex flex-col min-w-0">
                 <div className="flex items-center justify-between px-6 py-2 border-b border-gray-200 bg-white">
                     <div className="flex items-center gap-3">
@@ -664,16 +736,6 @@ export default function WorkflowEditor() {
                             <Sparkles className="w-4 h-4" /> ИИ помощник
                         </button>
                         <button
-                            onClick={() => setCheckDialog({ beforeSave: false })}
-                            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium border border-gray-200 text-gray-600 hover:bg-gray-50"
-                        >
-                            <ShieldCheck className={`w-4 h-4 ${issues.some((i) => i.level === "error") ? "text-red-500" : issues.length ? "text-amber-500" : "text-emerald-600"}`} />
-                            Проверить
-                            {issues.length > 0 && (
-                                <span className={`rounded-full px-1.5 text-[11px] text-white ${issues.some((i) => i.level === "error") ? "bg-red-500" : "bg-amber-500"}`}>{issues.length}</span>
-                            )}
-                        </button>
-                        <button
                             onClick={() => setShowLog((v) => !v)}
                             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium border ${
                                 showLog
@@ -682,6 +744,20 @@ export default function WorkflowEditor() {
                             }`}
                         >
                             <Terminal className="w-4 h-4" /> Журнал
+                        </button>
+                        <button
+                            onClick={() => {
+                                const issues = runValidation();
+                                setValidatedIssues(issues);
+                                setCheckDialog({ beforeSave: false });
+                            }}
+                            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium border border-gray-200 text-gray-600 hover:bg-gray-50"
+                        >
+                            <ShieldCheck className={`w-4 h-4 ${validatedIssues.some((i) => i.level === "error") ? "text-red-500" : validatedIssues.length ? "text-amber-500" : "text-emerald-600"}`} />
+                            Проверить
+                            {validatedIssues.length > 0 && (
+                                <span className={`rounded-full px-1.5 text-[11px] text-white ${validatedIssues.some((i) => i.level === "error") ? "bg-red-500" : "bg-amber-500"}`}>{validatedIssues.length}</span>
+                            )}
                         </button>
                         {hasListener ? (
                             <button
@@ -873,10 +949,10 @@ export default function WorkflowEditor() {
                             </button>
                         </div>
                         <div className="flex-1 space-y-2 overflow-y-auto px-5 py-4">
-                            {issues.length === 0 ? (
+                            {validatedIssues.length === 0 ? (
                                 <p className="text-sm text-emerald-700">Проблем не найдено: все шаги заполнены и соединены.</p>
                             ) : (
-                                issues.map((issue, i) => (
+                                validatedIssues.map((issue, i) => (
                                     <button
                                         key={i}
                                         disabled={!issue.nodeId}
@@ -947,6 +1023,22 @@ export default function WorkflowEditor() {
                     }}
                 />
             )}
+
+            <ConfirmDialog
+                open={!!leaveDialog}
+                title="Несохранённые изменения"
+                message="В сценарии есть несохранённые изменения. Если выйти сейчас, они будут утеряны."
+                confirmLabel="Выйти без сохранения"
+                cancelLabel="Остаться"
+                onCancel={() => setLeaveDialog(null)}
+                onConfirm={() => {
+                    const proceed = leaveDialog?.proceed;
+                    setLeaveDialog(null);
+                    // сбрасываем «грязное» состояние, чтобы beforeunload не сработал повторно
+                    savedFingerprint.current = workflowFingerprint(name, description, nodes, edges);
+                    proceed?.();
+                }}
+            />
         </div>
     );
 }

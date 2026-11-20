@@ -10,5 +10,5 @@
 .env
 **/.env
 backend/tests
-docs
 README.md
+# docs/ не исключаем: Dockerfile собирает VitePress-документацию в static/help/

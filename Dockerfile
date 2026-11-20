@@ -9,7 +9,9 @@ COPY frontend/ ./
 RUN npm run build
 
 # ── 2. сборка документации (VitePress) ──
-FROM node:22-alpine AS docs
+# Node 20 LTS: на node:22-alpine VitePress/Rollup иногда падает с
+# «Code is nested too deeply» в commonjs--resolver при разборе client/app.
+FROM node:20-bookworm-slim AS docs
 WORKDIR /build
 COPY docs/package.json docs/package-lock.json ./
 RUN npm ci

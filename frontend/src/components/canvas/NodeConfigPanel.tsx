@@ -330,8 +330,7 @@ export default function NodeConfigPanel({
                 <ul className="mx-4 mt-3 space-y-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
                     {issues.map((issue, i) => (
                         <li key={i} className={`text-xs leading-snug ${issue.level === "error" ? "text-red-700" : "text-amber-800"}`}>
-                            {issue.level === "error" ? "⚠ " : "• "}
-                            {issue.message}
+                            ⚠ {issue.message}
                         </li>
                     ))}
                 </ul>

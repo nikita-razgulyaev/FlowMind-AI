@@ -10,8 +10,9 @@ head:
 <script setup>
 import { onMounted } from "vue";
 onMounted(() => {
+  // Абсолютный путь с base: сайт документации отдаётся с /help/
   window.location.replace("/help/guide/");
 });
 </script>
 
-[Перейти к справочнику](/help/guide/)
+[Перейти к справочнику](/guide/)
