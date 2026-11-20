@@ -289,6 +289,9 @@ export default function WorkflowEditor() {
         if (isEditing) {
             loadWorkflow();
             loadExecutions(true);
+        } else {
+            // новый сценарий всегда выключен: редактор переиспользуется при переходе между маршрутами
+            setIsActive(false);
         }
     }, [id]);
 

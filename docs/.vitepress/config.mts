@@ -29,7 +29,7 @@ export default defineConfig({
             {
                 text: "Начало работы",
                 items: [
-                    { text: "О FlowMind AI", link: "/guide/" },
+                    { text: "О сервисе FlowMind AI", link: "/guide/" },
                     { text: "Быстрый старт", link: "/guide/quick-start" },
                     { text: "Основные понятия", link: "/guide/concepts" },
                 ],

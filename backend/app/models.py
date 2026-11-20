@@ -197,7 +197,7 @@ class Workflow(Base):
     description = Column(String, default="")
     nodes = Column(JSON, default=list)
     edges = Column(JSON, default=list)
-    is_active = Column(Boolean, default=True)
+    is_active = Column(Boolean, default=False)
     is_ai = Column(Boolean, default=False, nullable=False)               # есть ли в графе llm/agent-ноды
     has_telegram_trigger = Column(Boolean, default=False, nullable=False)
     activated_at = Column(UTCDateTime, nullable=True)                    # когда воркфлоу запущен (is_active: false → true)

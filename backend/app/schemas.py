@@ -24,7 +24,7 @@ class WorkflowCreate(BaseModel):
     description: str = Field("", max_length=1000)
     nodes: List[WorkflowNode]
     edges: List[WorkflowEdge]
-    is_active: bool = True
+    is_active: bool = False           # новый сценарий выключен, пока его явно не включат
 
 
 class WorkflowResponse(WorkflowCreate):
