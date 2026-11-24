@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from functools import lru_cache
 from typing import Optional
 
@@ -49,6 +50,31 @@ def _dotenv() -> dict:
 def _env_value(name: str) -> str:
     """Секрет по имени переменной: из окружения сервера или из файла .env."""
     return (os.environ.get(name) or _dotenv().get(name) or "") if name else ""
+
+
+_EMAIL_RE = re.compile(r"^[^@\s<>\"']+@[^@\s<>\"']+\.[^@\s<>\"']+$")
+_TELEGRAM_RE = re.compile(r"^(?:https?://)?(?:t\.me/|telegram\.me/)?@?([A-Za-z0-9_]{5,32})/?$")
+_VK_RE = re.compile(r"^(?:https?://)?((?:www\.|m\.)?vk\.(?:com|ru)/[A-Za-z0-9_.\-/]+?)/?$", re.IGNORECASE)
+
+
+def parse_support_telegram(raw: str) -> Optional[dict]:
+    """«@name», «name» или ссылка t.me/name → {label, url}. Всё остальное отбрасывается."""
+    m = _TELEGRAM_RE.match((raw or "").strip())
+    return {"label": f"@{m.group(1)}", "url": f"https://t.me/{m.group(1)}"} if m else None
+
+
+def parse_support_vk(raw: str) -> Optional[dict]:
+    """Ссылка на страницу или сообщество VK → {label, url}. Только vk.com / vk.ru и только https."""
+    m = _VK_RE.match((raw or "").strip())
+    if not m:
+        return None
+    path = m.group(1)
+    return {"label": path, "url": f"https://{path}"}
+
+
+def parse_support_email(raw: str) -> Optional[str]:
+    raw = (raw or "").strip()
+    return raw if raw and len(raw) <= 254 and _EMAIL_RE.match(raw) else None
 
 
 class Settings(BaseSettings):
@@ -136,6 +162,13 @@ class Settings(BaseSettings):
     max_nodes_per_workflow: int = 60
     max_parallel_executions_per_user: int = 3
 
+    # --- контакты и обратная связь ---
+    feedback_enabled: Optional[bool] = None   # по умолчанию: включено в cloud, выключено в local
+    formspree_url: str = ""                   # https://formspree.io/f/xxxx — копия каждого обращения на почту (необязательно)
+    support_email: str = ""                   # контакты показываются в футере и на странице /contacts; пустые — скрываются
+    support_telegram: str = ""                # @name, name или https://t.me/name
+    support_vk: str = ""                      # https://vk.com/...
+
     # ---------------- вычисляемые свойства ----------------
     @property
     def is_cloud(self) -> bool:
@@ -215,6 +248,42 @@ class Settings(BaseSettings):
             return self.google_redirect
         override = getattr(self, f"{family}_redirect_uri", "")
         return override or f"{self.base_url or 'http://localhost:8000'}/api/oauth/{family}/callback"
+
+    @property
+    def feedback_on(self) -> bool:
+        return self.is_cloud if self.feedback_enabled is None else self.feedback_enabled
+
+    @property
+    def formspree_endpoint(self) -> str:
+        """Адрес формы Formspree. Принимаются только https://formspree.io/…, чтобы опечатка в .env не превратилась в отправку данных на чужой адрес."""
+        url = (self.formspree_url or "").strip()
+        return url if url.startswith("https://formspree.io/") else ""
+
+    @property
+    def contacts(self) -> dict:
+        """Публичные контакты для /api/config. Некорректные значения молча отбрасываются (см. contacts_problems)."""
+        result: dict = {}
+        if email := parse_support_email(self.support_email):
+            result["email"] = email
+        if telegram := parse_support_telegram(self.support_telegram):
+            result["telegram"] = telegram
+        if vk := parse_support_vk(self.support_vk):
+            result["vk"] = vk
+        return result
+
+    @property
+    def contacts_problems(self) -> list[str]:
+        """Что заполнено в .env, но не распознано, — для предупреждения в логе при старте."""
+        problems = []
+        if self.support_email.strip() and not parse_support_email(self.support_email):
+            problems.append("SUPPORT_EMAIL")
+        if self.support_telegram.strip() and not parse_support_telegram(self.support_telegram):
+            problems.append("SUPPORT_TELEGRAM")
+        if self.support_vk.strip() and not parse_support_vk(self.support_vk):
+            problems.append("SUPPORT_VK")
+        if self.formspree_url.strip() and not self.formspree_endpoint:
+            problems.append("FORMSPREE_URL")
+        return problems
 
     @property
     def app_url(self) -> str:

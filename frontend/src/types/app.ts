@@ -12,6 +12,43 @@ export interface AppConfig {
     platform_ai_available: boolean;
     telegram_mode: "webhook" | "polling" | "off";
     languages: string[];
+    feedback_enabled: boolean;
+    contacts: Contacts;
+}
+
+export interface ContactLink { label: string; url: string }
+/** Публичные контакты из настроек сервера. Незаполненные поля отсутствуют. */
+export interface Contacts { email?: string; telegram?: ContactLink; vk?: ContactLink }
+
+export type FeedbackType = "question" | "bug" | "idea" | "payment" | "other";
+export type FeedbackStatus = "new" | "in_progress" | "done" | "spam";
+
+export interface FeedbackInput {
+    type: FeedbackType;
+    message: string;
+    name: string;
+    email: string;
+    page: string;
+    client_id: string;
+    hp: string;
+    elapsed_ms: number;
+}
+
+export interface FeedbackItem {
+    id: number;
+    created_at: string;
+    status: FeedbackStatus;
+    type: FeedbackType;
+    name: string;
+    email: string;
+    plan: string;
+    user_id: number | null;
+    message: string;
+    page: string;
+    user_agent: string;
+    spam_reason: string;
+    admin_note: string;
+    forward_status: "off" | "pending" | "sent" | "failed";
 }
 
 export interface User {

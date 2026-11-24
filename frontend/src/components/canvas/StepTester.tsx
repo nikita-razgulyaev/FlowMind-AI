@@ -48,7 +48,7 @@ export default function StepTester({ node, lastOutputs, defaultInput }: Props) {
                         onChange={(e) => setInput(e.target.value)}
                         rows={2}
                         placeholder="Где мой заказ 1234?"
-                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:outline-hidden focus:ring-blue-500"
                     />
                     <p className="mt-1 text-[11px] text-gray-400">
                         {hasPreviousData

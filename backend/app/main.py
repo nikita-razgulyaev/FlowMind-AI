@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import settings
 from .database import async_session
 from .migrations import run_migrations
-from .routers import admin, ai, auth, billing, connections, me, system, telegram, webhooks, workflows
+from .routers import admin, ai, auth, billing, connections, feedback, me, system, telegram, webhooks, workflows
 from .seed import run_seed
 from .services.maintenance import scheduler_loop
 from .services.telegram_service import poller
@@ -44,6 +44,8 @@ async def lifespan(app: FastAPI):
             log.warning("SECRET_KEY не задан — используется небезопасное значение по умолчанию!")
         else:
             log.info("SECRET_KEY не задан — локальный dev-ключ. Для облака задайте длинную случайную строку.")
+    for name in settings.contacts_problems:
+        log.warning("%s задан, но не распознан (проверьте формат) — значение игнорируется", name)
     scheduler = asyncio.create_task(scheduler_loop())
     if settings.effective_telegram_mode == "polling":
         poller.start()
@@ -78,7 +80,7 @@ async def security_headers(request: Request, call_next):
     return response
 
 
-for module in (system, auth, me, workflows, webhooks, connections, billing, telegram, admin, ai):
+for module in (system, auth, me, workflows, webhooks, connections, billing, telegram, admin, ai, feedback):
     app.include_router(module.router, prefix="/api")
 
 

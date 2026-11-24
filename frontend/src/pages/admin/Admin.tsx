@@ -5,6 +5,7 @@ import AdminDashboard from "./AdminDashboard";
 import AdminUsers from "./AdminUsers";
 import AdminPlans from "./AdminPlans";
 import AdminPayments from "./AdminPayments";
+import AdminFeedback from "./AdminFeedback";
 import AdminSystem from "./AdminSystem";
 
 const TABS = [
@@ -12,6 +13,7 @@ const TABS = [
     ["users", AdminUsers],
     ["plans", AdminPlans],
     ["payments", AdminPayments],
+    ["feedback", AdminFeedback],
     ["system", AdminSystem],
 ] as const;
 

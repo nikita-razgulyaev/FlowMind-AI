@@ -40,7 +40,7 @@ export function Field({ label, hint, className = "", ...rest }: FieldProps) {
             <span className="block text-sm font-medium text-gray-700 mb-1">{label}</span>
             <input
                 {...rest}
-                className={`w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50 ${className}`}
+                className={`w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:outline-hidden focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50 ${className}`}
             />
             {hint && <span className="block text-xs text-gray-400 mt-1">{hint}</span>}
         </label>
@@ -51,7 +51,7 @@ export function Select({ label, children, ...rest }: SelectHTMLAttributes<HTMLSe
     return (
         <label className="block">
             {label && <span className="block text-sm font-medium text-gray-700 mb-1">{label}</span>}
-            <select {...rest} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500">
+            <select {...rest} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:outline-hidden focus:ring-blue-500">
                 {children}
             </select>
         </label>

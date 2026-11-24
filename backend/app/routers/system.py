@@ -49,4 +49,6 @@ async def public_config():
         "platform_ai_available": settings.platform_llm_configured and ai_enabled,
         "telegram_mode": settings.effective_telegram_mode,
         "languages": ["ru"],
+        "feedback_enabled": settings.feedback_on,
+        "contacts": settings.contacts,
     }

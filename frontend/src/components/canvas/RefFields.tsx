@@ -7,7 +7,7 @@ export const DataPickerContext = createContext<{ groups: DataGroup[]; names: Rec
 type TextField = HTMLInputElement | HTMLTextAreaElement;
 
 const selectClass =
-    "min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-400";
+    "min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-700 focus:border-blue-500 focus:ring-2 focus:outline-hidden focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-400";
 const NONE_LABEL = "Нет соединённых шагов";
 const MANUAL_LABEL = "Ручной ввод";
 

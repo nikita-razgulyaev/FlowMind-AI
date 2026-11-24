@@ -7,7 +7,7 @@ import { EMAIL_PRESETS, PROVIDERS, TOOL_GROUPS, getProvider, type ProviderDef } 
 
 const label = "block text-xs font-medium text-gray-500 mb-1";
 const input =
-    "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500";
+    "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:outline-hidden focus:ring-blue-500 focus:border-blue-500";
 
 function EmailFields({ fields, setFields, presets }: { fields: Record<string, string>; setFields: (f: Record<string, string>) => void; presets: string[] }) {
     const allowed = EMAIL_PRESETS.filter((p) => presets.includes(p.key));

@@ -11,7 +11,7 @@ import {
 
 const label = "block text-sm font-medium text-gray-700 mb-1.5";
 const input =
-    "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500";
+    "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:outline-hidden focus:ring-blue-500 focus:border-blue-500";
 
 export default function Settings() {
     const [settings, setSettings] = useState<AppSettings>(getSettings());

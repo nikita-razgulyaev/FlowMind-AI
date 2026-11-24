@@ -1,17 +1,18 @@
 from datetime import timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..services.llm import provider_status as llm_provider_status
 from ..database import get_db
 from ..deps import require_admin
-from ..models import AuditLog, Execution, Payment, Plan, Subscription, User, Workflow, utcnow
+from ..models import AuditLog, Execution, Feedback, Payment, Plan, Subscription, User, Workflow, utcnow
 from ..services import billing
+from ..services.feedback import STATUSES as FEEDBACK_STATUSES, TYPES as FEEDBACK_TYPES, feedback_csv, forward_to_formspree
 from ..services.limits import (count_workflows, effective_plan_code, get_global, get_subscription, get_usage,
                                get_user_plan)
 from ..services.platform_ai import get_app_setting, set_app_setting
@@ -58,6 +59,7 @@ async def stats(admin: User = Depends(require_admin), db: AsyncSession = Depends
     return {
         "users_total": users_total, "users_new_7d": users_new, "paid_subscriptions": paid,
         "mrr": mrr, "revenue_total": revenue_total, "revenue_30d": revenue_30d,
+        "feedback_new": (await db.execute(select(func.count()).select_from(Feedback).where(Feedback.status == "new"))).scalar_one(),
         "workflows_total": (await db.execute(select(func.count()).select_from(Workflow))).scalar_one(),
         "executions_total": (await db.execute(select(func.count()).select_from(Execution))).scalar_one(),
         "runs_by_day": [{"date": d, **v} for d, v in days.items()],
@@ -222,3 +224,118 @@ async def audit_log(limit: int = 100, admin: User = Depends(require_admin), db: 
     rows = (await db.execute(select(AuditLog).order_by(AuditLog.id.desc()).limit(max(1, min(limit, 500))))).scalars().all()
     return [{"id": r.id, "admin_email": r.admin_email, "action": r.action, "target": r.target,
              "details": r.details, "created_at": r.created_at} for r in rows]
+
+
+# ───────────────────────── обратная связь ─────────────────────────
+
+def feedback_dto(f: Feedback) -> dict:
+    return {"id": f.id, "created_at": f.created_at, "status": f.status, "type": f.type, "name": f.name, "email": f.email,
+            "plan": f.plan, "user_id": f.user_id, "message": f.message, "page": f.page, "user_agent": f.user_agent,
+            "spam_reason": f.spam_reason, "admin_note": f.admin_note or "", "forward_status": f.forward_status}
+
+
+def _feedback_filter(status: str, type_: str, q: str):
+    """По умолчанию (status пуст) спам не показываем — он в отдельной вкладке."""
+    conditions = [Feedback.status == status] if status else [Feedback.status != "spam"]
+    if type_:
+        conditions.append(Feedback.type == type_)
+    if q.strip():
+        like = f"%{q.strip().lower()}%"
+        conditions.append(or_(func.lower(Feedback.message).like(like), func.lower(Feedback.email).like(like),
+                              func.lower(Feedback.name).like(like)))
+    return conditions
+
+
+def _check_feedback_filters(status: str, type_: str) -> None:
+    if status and status not in FEEDBACK_STATUSES:
+        raise HTTPException(400, detail={"code": "bad_status", "message": "Неизвестный статус"})
+    if type_ and type_ not in FEEDBACK_TYPES:
+        raise HTTPException(400, detail={"code": "bad_type", "message": "Неизвестный тип обращения"})
+
+
+@router.get("/feedback")
+async def admin_feedback(status: str = "", type: str = "", q: str = "", limit: int = 25, offset: int = 0,
+                         admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    _check_feedback_filters(status, type)
+    limit = max(1, min(limit, 100))
+    conditions = _feedback_filter(status, type, q)
+    total = (await db.execute(select(func.count()).select_from(Feedback).where(*conditions))).scalar_one()
+    rows = (await db.execute(select(Feedback).where(*conditions).order_by(Feedback.id.desc()).limit(limit).offset(max(0, offset)))).scalars().all()
+    counts = {k: 0 for k in FEEDBACK_STATUSES}
+    for key, n in (await db.execute(select(Feedback.status, func.count()).group_by(Feedback.status))).all():
+        counts[key] = n
+    return {"total": total, "items": [feedback_dto(f) for f in rows], "counts": counts}
+
+
+@router.get("/feedback/export.csv")
+async def admin_feedback_csv(status: str = "", type: str = "", q: str = "", admin: User = Depends(require_admin),
+                             db: AsyncSession = Depends(get_db)):
+    _check_feedback_filters(status, type)
+    rows = (await db.execute(select(Feedback).where(*_feedback_filter(status, type, q)).order_by(Feedback.id.desc()).limit(10_000))).scalars().all()
+    filename = f"feedback-{utcnow().strftime('%Y-%m-%d')}.csv"
+    return Response(feedback_csv(rows), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+class FeedbackPatch(BaseModel):
+    status: Optional[str] = None
+    admin_note: Optional[str] = Field(default=None, max_length=2000)
+
+
+@router.patch("/feedback/{feedback_id}")
+async def admin_feedback_update(feedback_id: int, data: FeedbackPatch, background: BackgroundTasks,
+                                admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    f = await db.get(Feedback, feedback_id)
+    if not f:
+        raise HTTPException(404, "Not found")
+    if data.status is not None and data.status not in FEEDBACK_STATUSES:
+        raise HTTPException(400, detail={"code": "bad_status", "message": "Неизвестный статус"})
+    forward = False
+    if data.status is not None:
+        # «Это не спам»: обращение, которое не успело уйти в Formspree, отправляем сейчас
+        forward = f.status == "spam" and data.status != "spam" and f.forward_status == "off" and bool(settings.formspree_endpoint)
+        f.status = data.status
+    if data.admin_note is not None:
+        f.admin_note = data.admin_note.strip()
+    if forward:
+        f.forward_status = "pending"
+    await db.commit()
+    if forward:
+        background.add_task(forward_to_formspree, f.id)
+    return feedback_dto(f)
+
+
+@router.post("/feedback/{feedback_id}/forward")
+async def admin_feedback_forward(feedback_id: int, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    f = await db.get(Feedback, feedback_id)
+    if not f:
+        raise HTTPException(404, "Not found")
+    if not settings.formspree_endpoint:
+        raise HTTPException(400, detail={"code": "formspree_off", "message": "Пересылка не настроена: задайте FORMSPREE_URL"})
+    if f.status == "spam":
+        raise HTTPException(400, detail={"code": "is_spam", "message": "Сначала верните обращение из спама"})
+    await forward_to_formspree(f.id)
+    await db.refresh(f)
+    return {"forward_status": f.forward_status}
+
+
+@router.delete("/feedback/{feedback_id}")
+async def admin_feedback_delete(feedback_id: int, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    f = await db.get(Feedback, feedback_id)
+    if not f:
+        raise HTTPException(404, "Not found")
+    await db.delete(f)
+    await db.commit()
+    await audit(db, admin, "feedback.delete", str(feedback_id))
+    return {"ok": True}
+
+
+@router.delete("/feedback")
+async def admin_feedback_clear_spam(status: str = "", admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    """Массово удаляет только спам — другие статусы так удалить нельзя."""
+    if status != "spam":
+        raise HTTPException(400, detail={"code": "only_spam", "message": "Массово можно удалить только спам (status=spam)"})
+    result = await db.execute(delete(Feedback).where(Feedback.status == "spam"))
+    await db.commit()
+    await audit(db, admin, "feedback.clear_spam", "", {"deleted": result.rowcount})
+    return {"deleted": result.rowcount}

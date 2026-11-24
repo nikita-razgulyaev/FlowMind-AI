@@ -13,6 +13,7 @@ import Register from "./pages/Register";
 import { ForgotPassword, ResetPassword, VerifyEmail } from "./pages/PasswordPages";
 import Pricing from "./pages/Pricing";
 import Landing from "./pages/Landing";
+import Contacts from "./pages/Contacts";
 import Checkout from "./pages/Checkout";
 import BillingReturn from "./pages/BillingReturn";
 import Account from "./pages/Account";
@@ -51,6 +52,7 @@ export default function App() {
                 <Route path="/reset-password" element={<ResetPassword />} />
                 <Route path="/verify-email" element={<VerifyEmail />} />
                 <Route path="/pricing" element={<Pricing />} />
+                <Route path="/contacts" element={<Contacts />} />
 
                 <Route path="/workflow/new" element={<RequireAuth><WorkflowEditor /></RequireAuth>} />
                 <Route path="/workflow/:id" element={<RequireAuth><WorkflowEditor /></RequireAuth>} />

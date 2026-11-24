@@ -154,7 +154,7 @@ export default function AiChatPanel({ getGraph, onApply }: Props) {
                     onChange={(e) => setDraft(e.target.value)}
                     placeholder="Опиши, что собрать или изменить…"
                     maxLength={4000}
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-xs focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-xs focus:ring-2 focus:outline-hidden focus:ring-indigo-400 focus:border-indigo-400"
                 />
                 <button
                     type="submit"

@@ -14,6 +14,7 @@ os.environ["ADMIN_EMAIL"] = "boss@example.com"
 os.environ["DEMO_MODE"] = "true"
 os.environ["ROUTERAI_API_KEY"] = "test-platform-key"
 os.environ["PAYMENT_PROVIDER"] = "mock"
+os.environ["FORMSPREE_URL"] = "https://formspree.io/f/testform"
 os.environ["PUBLIC_BASE_URL"] = "https://flowmind.test" if TEST_MODE == "cloud" else ""
 os.environ.pop("AUTH_ENABLED", None)
 
@@ -38,6 +39,8 @@ class FakeNet:
         self.tg_updates: list[dict] = []
         self.yookassa_payments: dict[str, dict] = {}
         self.yookassa_status = "pending"
+        self.formspree_calls: list[dict] = []
+        self.formspree_mode = "ok"               # ok | http500 | rejected | network
 
     def reset(self):
         self.__init__()
@@ -65,6 +68,15 @@ class FakeNet:
             if method == "getUpdates" and body.get("offset") != -1 and self.tg_updates:
                 return httpx.Response(200, json={"ok": True, "result": [self.tg_updates.pop(0)]})
             return httpx.Response(200, json={"ok": True, "result": []})
+        if host == "formspree.io":
+            self.formspree_calls.append({"url": str(request.url), "body": body, "headers": dict(request.headers)})
+            if self.formspree_mode == "network":
+                raise httpx.ConnectError("formspree unreachable")
+            if self.formspree_mode == "http500":
+                return httpx.Response(500, json={"error": "boom"})
+            if self.formspree_mode == "rejected":
+                return httpx.Response(200, json={"ok": False, "errors": [{"message": "submission limit"}]})
+            return httpx.Response(200, json={"next": "/thanks", "ok": True})
         if host == "api.yookassa.ru":
             if request.method == "POST":
                 pid = f"yk_{uuid.uuid4().hex[:10]}"
@@ -105,7 +117,8 @@ def fake_net(monkeypatch):
 
     monkeypatch.setattr(httpx, "AsyncClient", factory)
     for limiter in (ratelimit.login_limiter, ratelimit.register_limiter, ratelimit.email_limiter,
-                    ratelimit.ai_chat_limiter, ratelimit.telegram_chat_limiter, ratelimit.webhook_limiter):
+                    ratelimit.ai_chat_limiter, ratelimit.telegram_chat_limiter, ratelimit.webhook_limiter,
+                    ratelimit.feedback_burst_limiter, ratelimit.feedback_hour_limiter):
         limiter._hits.clear()
     return NET
 

@@ -3,7 +3,7 @@ import { Plus, Trash2 } from "lucide-react";
 
 const label = "block text-xs font-medium text-gray-500 mb-1";
 const input =
-    "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500";
+    "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:outline-hidden focus:ring-blue-500 focus:border-blue-500";
 const mono = `${input} font-mono`;
 
 export interface ToolParam {

@@ -1,6 +1,7 @@
 import type { Workflow, Connection } from "../types/workflow";
 import type {
-    AiChatMessage, AppConfig, CardInput, MeResponse, Payment, Period, Plan, Quote, Subscription, User,
+    AiChatMessage, AppConfig, CardInput, FeedbackInput, FeedbackItem, FeedbackStatus, FeedbackType, MeResponse, Payment, Period, Plan,
+    Quote, Subscription, User,
 } from "../types/app";
 
 const API_BASE = "/api";
@@ -228,6 +229,32 @@ class ApiClient {
 
     // ───── админка ─────
     adminStats() { return request<any>("/admin/stats"); }
+
+    // ───── обратная связь ─────
+    sendFeedback(input: FeedbackInput) { return request<{ ok: boolean }>("/feedback", json("POST", input)); }
+    adminFeedback(params: { status?: string; type?: string; q?: string; offset?: number; limit?: number }) {
+        const query = new URLSearchParams();
+        Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== "") query.set(k, String(v)); });
+        return request<{ total: number; items: FeedbackItem[]; counts: Record<FeedbackStatus, number> }>(`/admin/feedback?${query}`);
+    }
+    adminFeedbackUpdate(id: number, patch: { status?: FeedbackStatus; admin_note?: string }) {
+        return request<FeedbackItem>(`/admin/feedback/${id}`, json("PATCH", patch));
+    }
+    adminFeedbackDelete(id: number) { return request<{ ok: boolean }>(`/admin/feedback/${id}`, json("DELETE")); }
+    adminFeedbackClearSpam() { return request<{ deleted: number }>("/admin/feedback?status=spam", json("DELETE")); }
+    adminFeedbackForward(id: number) { return request<{ forward_status: FeedbackItem["forward_status"] }>(`/admin/feedback/${id}/forward`, json("POST")); }
+    /** CSV нужно скачивать запросом с токеном, обычная ссылка не передаст авторизацию. */
+    async adminFeedbackCsv(params: { status?: string; type?: FeedbackType | ""; q?: string }): Promise<{ blob?: Blob; error?: string }> {
+        const query = new URLSearchParams();
+        Object.entries(params).forEach(([k, v]) => { if (v) query.set(k, String(v)); });
+        try {
+            const res = await rawRequest(`/admin/feedback/export.csv?${query}`, {});
+            if (!res.ok) return { error: "Не удалось выгрузить CSV" };
+            return { blob: await res.blob() };
+        } catch {
+            return { error: "Нет соединения с сервером" };
+        }
+    }
     adminUsers(q = "", offset = 0) {
         return request<{ total: number; items: any[] }>(`/admin/users?q=${encodeURIComponent(q)}&offset=${offset}&limit=25`);
     }

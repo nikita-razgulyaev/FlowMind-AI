@@ -27,7 +27,7 @@ export const OPERATORS: { id: string; label: string; noValue?: boolean }[] = [
 
 export const EMPTY_RULE: Rule = { value: "{input}", mode: "auto", operator: "contains", expected: "" };
 
-const field = "w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500";
+const field = "w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:outline-hidden focus:ring-blue-500 focus:border-blue-500";
 
 interface Props {
     rules: Rule[];

@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import settings
 from ..database import get_db
 from ..deps import get_current_user
-from ..models import (Connection, EmailToken, Execution, Payment, RefreshToken, Subscription,
+from ..models import (Connection, EmailToken, Execution, Feedback, Payment, RefreshToken, Subscription,
                       UsageCounter, User, Workflow)
 from ..security import hash_password, verify_password
 from ..services import telegram_service
@@ -81,6 +81,7 @@ async def delete_account(data: DeleteAccountIn, response: Response, user: User =
     for model in (Execution, Workflow, Connection, UsageCounter, RefreshToken, EmailToken, Subscription):
         await db.execute(delete(model).where(model.user_id == user.id))
     await db.execute(update(Payment).where(Payment.user_id == user.id).values(user_id=None))   # платежи остаются для учёта
+    await db.execute(update(Feedback).where(Feedback.user_id == user.id).values(user_id=None, email="", name=""))   # отзывы остаются, но обезличиваются
     await db.delete(user)
     await db.commit()
     response.delete_cookie(COOKIE, path=COOKIE_PATH)

@@ -31,6 +31,15 @@ services:
         value: "true"      # для презентации; выключите, когда придут реальные пользователи
       - key: ADMIN_EMAIL
         sync: false
+      # Контакты и копия обращений на почту — необязательно, задаются в панели Render (Environment)
+      - key: SUPPORT_EMAIL
+        sync: false
+      - key: SUPPORT_TELEGRAM
+        sync: false
+      - key: SUPPORT_VK
+        sync: false
+      - key: FORMSPREE_URL
+        sync: false
       - key: ADMIN_PASSWORD
         sync: false
       - key: ORCAROUTER_API_KEY

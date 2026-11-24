@@ -6,11 +6,12 @@ import { useAuth } from "../store/auth";
 import { Button } from "./common/ui";
 import { hardNavigate } from "../utils/navigation";
 import LogoIcon from "./LogoIcon";
+import { contactsLink } from "./feedback/ContactsList";
 
 /** Шапка «презентационных» страниц (лендинг, тарифы). Ссылки с якорями ведут на /about — страницу, доступную всем. */
 export default function PublicHeader() {
     const { t } = useTranslation();
-    const { me } = useAuth();
+    const { me, config } = useAuth();
     const { pathname, hash } = useLocation();
     const [open, setOpen] = useState(false);
 
@@ -22,6 +23,8 @@ export default function PublicHeader() {
         { to: "/about#pricing", label: t("landing.navPricing"), active: pathname === "/about" && hash === "#pricing" },
         { to: "/about#faq", label: t("landing.navFaq"), active: pathname === "/about" && hash === "#faq" },
     ];
+    const contacts = contactsLink(config);
+    if (contacts) nav.push({ to: contacts, label: t("landing.navContacts"), active: contacts === "/contacts" ? pathname === "/contacts" : pathname === "/about" && hash === "#contact" });
 
     /** Якорь на текущей странице: плавный скролл к блоку (повторный клик по тому же #якорю иначе ничего не делает). */
     const handleNavClick = (e: MouseEvent, to: string) => {

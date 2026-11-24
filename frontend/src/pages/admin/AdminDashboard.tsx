@@ -34,6 +34,7 @@ export default function AdminDashboard() {
                 <Stat label={t("admin.stats.revenue30")} value={formatRub(stats.revenue_30d)} hint={t("admin.stats.revenueTotal", { total: formatRub(stats.revenue_total) })} />
                 <Stat label={t("admin.stats.workflows")} value={stats.workflows_total} />
                 <Stat label={t("admin.stats.executions")} value={stats.executions_total} />
+                <Stat label={t("admin.stats.feedbackNew")} value={stats.feedback_new ?? 0} hint={t("admin.stats.feedbackNewHint")} />
             </div>
 
             <Card className="p-5">

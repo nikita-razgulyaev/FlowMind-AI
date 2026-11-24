@@ -95,8 +95,17 @@
 | `POST /api/admin/users/{id}/grant` | Выдать подписку |
 | `GET`, `PUT /api/admin/plans`, `/api/admin/plans/{code}` | Тарифы |
 | `GET /api/admin/payments` | Платежи |
+| `GET /api/admin/feedback` | Обращения: фильтры `status`, `type`, `q`, постраничность `limit` и `offset`; в ответе счётчики по статусам |
+| `GET /api/admin/feedback/export.csv` | Выгрузка обращений в CSV (те же фильтры) |
+| `PATCH`, `DELETE /api/admin/feedback/{id}` | Статус и заметка; удаление |
+| `POST /api/admin/feedback/{id}/forward` | Повторно отправить копию в Formspree |
+| `DELETE /api/admin/feedback?status=spam` | Удалить весь спам (другие статусы так удалить нельзя) |
 | `GET`, `PUT /api/admin/settings` | Глобальные настройки |
 | `GET /api/admin/audit` | Журнал действий |
+
+## Обратная связь
+
+`POST /api/feedback` принимает обращение от гостя или вошедшего пользователя (токен необязателен; просроченный токен не мешает). Поля: `message` (3–3000 символов), `type` (`question`, `bug`, `idea`, `payment`, `other`), необязательные `name`, `email`, `page`, `client_id`. Повторная отправка с тем же `client_id` дубль не создаёт. Служебные поля `hp` и `elapsed_ms` нужны для защиты от ботов: **`hp` должно оставаться пустым**. Ответ всегда `{"ok": true}`, в том числе для обращений, помеченных как спам. Ошибки: `422` — неверные данные, `429` — слишком часто, `404` — форма отключена.
 
 ## Ошибки
 

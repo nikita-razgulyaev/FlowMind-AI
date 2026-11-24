@@ -40,3 +40,7 @@ email_limiter = RateLimiter(limit=5, window_seconds=3600)
 ai_chat_limiter = RateLimiter(limit=20, window_seconds=60)
 telegram_chat_limiter = RateLimiter(limit=20, window_seconds=60)
 webhook_limiter = RateLimiter(limit=60, window_seconds=60)
+
+# Обращения: два окна на IP. Лимит в час щедрый — за одним адресом (колледж, офис) могут сидеть несколько тестировщиков.
+feedback_burst_limiter = RateLimiter(limit=5, window_seconds=60)
+feedback_hour_limiter = RateLimiter(limit=40, window_seconds=3600)

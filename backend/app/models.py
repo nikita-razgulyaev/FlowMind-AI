@@ -186,6 +186,29 @@ class AuditLog(Base):
     created_at = Column(UTCDateTime, default=utcnow, index=True)
 
 
+# ───────────────────────── обратная связь ─────────────────────────
+
+class Feedback(Base):
+    """Обращение с формы обратной связи. Подозрительные (спам-ловушка и т.п.) сохраняются со статусом spam — ничего не теряется."""
+    __tablename__ = "feedback"
+
+    id = Column(Integer, primary_key=True)
+    created_at = Column(UTCDateTime, default=utcnow, index=True)
+    client_id = Column(String(64), nullable=True, unique=True, index=True)     # ключ повторной отправки: защита от дублей
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    name = Column(String(120), default="")
+    email = Column(String(320), default="")
+    plan = Column(String(20), default="")                                     # тариф пользователя на момент обращения
+    type = Column(String(20), nullable=False, default="other")                # question | bug | idea | payment | other
+    message = Column(Text, nullable=False)
+    page = Column(String(200), default="")                                    # путь страницы без query и #hash
+    user_agent = Column(String(300), default="")
+    status = Column(String(20), nullable=False, default="new", index=True)    # new | in_progress | done | spam
+    spam_reason = Column(String(40), default="")                              # honeypot | too_fast | links
+    admin_note = Column(Text, default="")
+    forward_status = Column(String(20), default="off")                        # off | pending | sent | failed (копия в Formspree)
+
+
 # ───────────────────────── воркфлоу ─────────────────────────
 
 class Workflow(Base):

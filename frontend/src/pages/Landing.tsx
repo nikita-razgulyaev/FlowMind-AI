@@ -7,8 +7,10 @@ import { api } from "../api/client";
 import { useAuth } from "../store/auth";
 import type { Plan } from "../types/app";
 import PricingCards from "../components/billing/PricingCards";
+import PublicFooter from "../components/PublicFooter";
 import PublicHeader from "../components/PublicHeader";
-import { Button } from "../components/common/ui";
+import FeedbackForm from "../components/feedback/FeedbackForm";
+import { Button, Card } from "../components/common/ui";
 import { usePlanSelection } from "./Pricing";
 
 const FEATURES = [
@@ -19,6 +21,17 @@ const FEATURES = [
     { key: "google", icon: Table, color: "bg-emerald-100 text-emerald-600" },
     { key: "models", icon: Cloud, color: "bg-orange-100 text-orange-600" },
 ] as const;
+
+const GITHUB_URL = "https://github.com/nikita-razgulyaev/FlowMind-AI";
+
+/** Знак GitHub: в установленной версии lucide-react иконок брендов нет. */
+function GithubIcon({ className }: { className?: string }) {
+    return (
+        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className={className}>
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+        </svg>
+    );
+}
 
 const FAQ_KEYS = ["free", "ownKeys", "local", "payment", "cancel"] as const;
 
@@ -43,13 +56,13 @@ function FlowIllustration() {
         return (
             <div
                 key={name}
-                className={`absolute flex items-center gap-2 rounded-xl border-2 bg-white- px-3 shadow-md min-w-0 overflow-hidden ${meta.ring}`}
+                className={`absolute flex items-center gap-2 rounded-xl border-2 bg-white px-3 shadow-md min-w-0 overflow-hidden ${meta.ring}`}
                 style={{ left: x, top: y, width: w, height: NODE_H }}
             >
                 <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${meta.badge}`}>
                     <Icon className="h-4 w-4" />
                 </span>
-                <span className="truncate text-[13px] font-semibold text-gray-900-[rgba(255,255,245,0.86)]" title={name}>{name}</span>
+                <span className="truncate text-[13px] font-semibold text-gray-900" title={name}>{name}</span>
             </div>
         );
     };
@@ -80,6 +93,7 @@ export default function Landing() {
     const { t } = useTranslation();
     const [plans, setPlans] = useState<Plan[]>([]);
     const me = useAuth((st) => st.me);
+    const feedbackEnabled = useAuth((st) => st.config?.feedback_enabled);
     const select = usePlanSelection();
     useEffect(() => { api.getPlans().then(({ data }) => setPlans(data ?? [])); }, []);
 
@@ -145,7 +159,16 @@ export default function Landing() {
                         <HardDrive className="w-7 h-7 text-emerald-600" />
                         <h3 className="mt-3 font-semibold text-lg">{t("landing.local.title")}</h3>
                         <p className="mt-2 text-sm text-gray-600">{t("landing.local.text")}</p>
-                        <pre className="mt-4 text-xs bg-gray-900 text-gray-100 rounded-lg p-3 overflow-x-auto">docker compose up --build</pre>
+                        <a
+                            href={GITHUB_URL}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-4 inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50 transition-colors"
+                        >
+                            <GithubIcon className="h-4 w-4" />
+                            {t("landing.local.github")}
+                        </a>
+                        <pre className="mt-3 text-xs bg-gray-900 text-gray-100 rounded-lg p-3 overflow-x-auto">docker compose up --build</pre>
                     </div>
                 </div>
             </section>
@@ -173,6 +196,16 @@ export default function Landing() {
                 </div>
             </section>
 
+            {feedbackEnabled && (
+                <section id="contact" className="scroll-mt-20 bg-gray-50">
+                    <div className="max-w-2xl mx-auto px-6 py-20">
+                        <h2 className="text-3xl font-extrabold text-center text-gray-900">{t("contacts.formTitle")}</h2>
+                        <p className="mt-3 text-center text-gray-500">{t("feedback.subtitle")}</p>
+                        <Card className="mt-10 p-6"><FeedbackForm /></Card>
+                    </div>
+                </section>
+            )}
+
             <section className="bg-blue-600">
                 <div className="max-w-4xl mx-auto px-6 py-16 text-center text-white">
                     <h2 className="text-3xl font-extrabold">{t("landing.ctaTitle")}</h2>
@@ -183,24 +216,7 @@ export default function Landing() {
                 </div>
             </section>
 
-            <footer className="border-t border-gray-100">
-                <div className="max-w-6xl mx-auto px-6 py-8 flex flex-wrap items-center justify-between gap-4 text-sm text-gray-500">
-                    <span>© {new Date().getFullYear()} FlowMind AI</span>
-                    <nav className="flex flex-wrap gap-x-6 gap-y-2">
-                        <Link to="/about#features" className="hover:text-gray-700">{t("landing.navFeatures")}</Link>
-                        <Link to="/pricing" className="hover:text-gray-700">{t("landing.navPricing")}</Link>
-                        <Link to="/about#faq" className="hover:text-gray-700">{t("landing.navFaq")}</Link>
-                        {me ? (
-                            <Link to="/" className="hover:text-gray-700">{t("landing.openApp")}</Link>
-                        ) : (
-                            <>
-                                <Link to="/login" className="hover:text-gray-700">{t("auth.login")}</Link>
-                                <Link to="/register" className="hover:text-gray-700">{t("auth.register")}</Link>
-                            </>
-                        )}
-                    </nav>
-                </div>
-            </footer>
+            <PublicFooter />
         </div>
     );
 }
