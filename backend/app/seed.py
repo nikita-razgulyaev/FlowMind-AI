@@ -1,44 +1,66 @@
 """Начальные данные: тарифы, локальный пользователь, администратор. Всё идемпотентно."""
 import logging
+from typing import Optional
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import settings
 from .deps import LOCAL_EMAIL
-from .models import Connection, Execution, Plan, Subscription, User, Workflow
+from .models import AppSetting, Connection, Execution, Plan, Subscription, User, Workflow
+from .plans_config import LIMIT_FIELDS, plan_rows
 from .security import hash_password
 
 log = logging.getLogger("flowmind.seed")
 
-# Цены в копейках. Год = 12 месяцев со скидкой 20%.
-DEFAULT_PLANS = [
-    dict(code="free", name="Бесплатно", description="Чтобы попробовать сервис", price_month=0, price_year=0, sort_order=0,
-         max_ai_workflows=5, max_regular_workflows=20, ai_runs_month=300, regular_runs_month=3000,
-         telegram_triggers=1, history_days=14, ai_chat_messages_month=100,
-         features=["5 AI-воркфлоу и 20 обычных", "300 AI-запусков в месяц", "3 000 обычных запусков", "1 Telegram-триггер",
-                   "AI-ассистент для сборки графа", "История выполнений 14 дней"]),
-    dict(code="pro", name="Про", description="Для малого бизнеса и фрилансеров", price_month=99000, price_year=950400, sort_order=1,
-         max_ai_workflows=25, max_regular_workflows=100, ai_runs_month=3000, regular_runs_month=30000,
-         telegram_triggers=5, history_days=60, ai_chat_messages_month=1500,
-         features=["25 AI-воркфлоу и 100 обычных", "3 000 AI-запусков в месяц", "30 000 обычных запусков", "5 Telegram-триггеров",
-                   "Свои API-ключи (OpenAI, Groq, HF и др.)", "История выполнений 60 дней"]),
-    dict(code="business", name="Бизнес", description="Для команд и серьёзной нагрузки", price_month=299000, price_year=2870400, sort_order=2,
-         max_ai_workflows=100, max_regular_workflows=None, ai_runs_month=20000, regular_runs_month=200000,
-         telegram_triggers=20, history_days=180, ai_chat_messages_month=10000,
-         features=["100 AI-воркфлоу, обычные без лимита", "20 000 AI-запусков в месяц", "200 000 обычных запусков", "20 Telegram-триггеров",
-                   "Приоритетная поддержка", "История выполнений 180 дней"]),
-    dict(code="local", name="Локальный", description="Self-hosted: без ограничений", price_month=0, price_year=0, sort_order=99,
-         is_public=False, features=[]),
-]
+# Тарифы и лимиты задаются в одном месте: app/plans_config.py
+DEFAULT_PLANS = plan_rows()
+
+PLANS_SNAPSHOT_KEY = "plans_defaults_applied"
+SYNC_FIELDS = ("name", "description", "price_month", "price_year", "sort_order", "is_public", "features",
+               *LIMIT_FIELDS)
+
+
+async def sync_plans(db: AsyncSession, rows: Optional[list] = None, force: Optional[bool] = None) -> None:
+    """Приводит таблицу plans в соответствие с plans_config.py.
+
+    * Новых тарифов добавляет.
+    * В существующих поле обновляется, только если в базе оно всё ещё равно прежнему значению из кода
+      (запомненному при прошлом старте): ручные правки администратора не затираются.
+    * force=True (PLANS_FORCE_SYNC=true) перезаписывает все поля значениями из кода.
+    """
+    rows = DEFAULT_PLANS if rows is None else rows
+    force = settings.plans_force_sync if force is None else force
+    existing = {p.code: p for p in (await db.execute(select(Plan))).scalars()}
+    snapshot_row = (await db.execute(select(AppSetting).where(AppSetting.key == PLANS_SNAPSHOT_KEY))).scalar_one_or_none()
+    snapshot = snapshot_row.value if snapshot_row is not None and isinstance(snapshot_row.value, dict) else {}
+
+    for spec in rows:
+        plan = existing.get(spec["code"])
+        if plan is None:
+            db.add(Plan(**spec))
+            continue
+        previous = snapshot.get(spec["code"])
+        for field in SYNC_FIELDS:
+            if field not in spec:
+                continue
+            if force:
+                setattr(plan, field, spec[field])
+            elif previous is not None and field in previous and spec[field] != previous[field] \
+                    and getattr(plan, field) == previous[field]:
+                setattr(plan, field, spec[field])
+                log.info("Тариф %s: %s обновлён из plans_config.py (%r → %r)", spec["code"], field, previous[field], spec[field])
+
+    new_snapshot = {spec["code"]: {f: spec[f] for f in SYNC_FIELDS if f in spec} for spec in rows}
+    if snapshot_row is None:
+        db.add(AppSetting(key=PLANS_SNAPSHOT_KEY, value=new_snapshot))
+    else:
+        snapshot_row.value = new_snapshot
+    await db.commit()
 
 
 async def seed_plans(db: AsyncSession) -> None:
-    existing = {c for (c,) in (await db.execute(select(Plan.code))).all()}
-    for spec in DEFAULT_PLANS:
-        if spec["code"] not in existing:                    # правки администратора не перезатираются
-            db.add(Plan(**spec))
-    await db.commit()
+    await sync_plans(db)
 
 
 async def ensure_subscription(db: AsyncSession, user: User) -> None:

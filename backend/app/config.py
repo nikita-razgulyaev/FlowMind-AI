@@ -12,6 +12,8 @@ from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL, make_url
 
+from .plans_config import AI_DAILY_CAP
+
 
 def normalize_database_url(raw: str) -> tuple[URL, dict]:
     """Приводит URL из .env / Render / Heroku к виду, понятному async-драйверам."""
@@ -135,7 +137,8 @@ class Settings(BaseSettings):
     # JSON: [{"name": "...", "base_url": "https://.../v1", "model": "...", "api_key_env": "ИМЯ_ПЕРЕМЕННОЙ"}], вместо api_key_env можно указать api_key.
     # Если список не задан, используется модель по умолчанию (DEFAULT_PLATFORM_LLM_PROVIDERS) с ключом из ROUTERAI_API_KEY.
     platform_llm_providers_raw: str = Field(default="", validation_alias=AliasChoices("PLATFORM_LLM_PROVIDERS"))
-    ai_daily_cap: int = 5000                  # общий суточный потолок запросов к ключу платформы
+    ai_daily_cap: int = AI_DAILY_CAP          # общий суточный потолок запросов к ключу платформы (значение по умолчанию: plans_config.py)
+    plans_force_sync: bool = False            # True: при старте перезаписать все тарифы значениями из plans_config.py (затирает правки админки)
     platform_llm_cooldown_seconds: int = 60   # на сколько отложить провайдера после сбоя (при повторных сбоях растёт, максимум 10 минут)
 
     # --- Telegram ---

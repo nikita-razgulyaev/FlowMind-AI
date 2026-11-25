@@ -9,7 +9,6 @@ import type { FeedbackItem } from "../../types/app";
 import AdminFeedback from "../../pages/admin/AdminFeedback";
 import ContactsList from "./ContactsList";
 import FeedbackForm from "./FeedbackForm";
-import FeedbackModal from "./FeedbackModal";
 
 vi.mock("../../api/client", async (importOriginal) => {
     const actual = await importOriginal<typeof import("../../api/client")>();
@@ -97,10 +96,7 @@ describe("внешний вид полей", () => {
     });
 
     it("тексты формы", () => {
-        render(<FeedbackModal open onClose={() => {}} />);
-        expect(screen.getByRole("heading", { level: 2, name: "Написать нам" })).toBeTruthy();
-        expect(screen.getByRole("dialog", { name: "Написать нам" })).toBeTruthy();
-        expect(screen.getByText("Нашли ошибку, хотите предложить идею или не получается разобраться? Напишите нам")).toBeTruthy();
+        render(<FeedbackForm />);
         expect(textarea().getAttribute("placeholder")).toBe("Что вас интересует или что хотите предложить? Если это ошибка — опишите, что делали и что произошло");
     });
 });
@@ -216,31 +212,6 @@ describe("контакты", () => {
     it("ничего не рисует, если контактов нет", () => {
         const { container } = render(<ContactsList contacts={{}} />);
         expect(container.innerHTML).toBe("");
-    });
-});
-
-describe("окно обратной связи", () => {
-    it("закрывается по Esc и крестику, но не по клику на фон — текст не теряется", async () => {
-        const user = userEvent.setup();
-        const onClose = vi.fn();
-        const { container } = render(<FeedbackModal open onClose={onClose} />);
-        await user.type(textarea(), "Набранный текст");
-        await user.click(container.firstElementChild as Element);
-        expect(onClose).not.toHaveBeenCalled();
-        await user.keyboard("{Escape}");
-        expect(onClose).toHaveBeenCalledTimes(1);
-        await user.click(screen.getByRole("button", { name: "Закрыть" }));
-        expect(onClose).toHaveBeenCalledTimes(2);
-    });
-
-    it("черновик переживает закрытие и повторное открытие", async () => {
-        const user = userEvent.setup();
-        const { rerender } = render(<FeedbackModal open onClose={() => {}} />);
-        await user.type(textarea(), "Не потеряй меня");
-        rerender(<FeedbackModal open={false} onClose={() => {}} />);
-        expect(screen.queryByRole("dialog")).toBeNull();
-        rerender(<FeedbackModal open onClose={() => {}} />);
-        expect((textarea() as HTMLTextAreaElement).value).toBe("Не потеряй меня");
     });
 });
 

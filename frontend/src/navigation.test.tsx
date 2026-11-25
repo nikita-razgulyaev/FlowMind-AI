@@ -14,7 +14,7 @@ const CONFIG = {
     require_email_verification: false, default_llm_mode: "cloud", ollama_model: "qwen2.5",
     platform_ai_available: true, telegram_mode: "webhook", languages: ["ru"],
 };
-const LIMITS = { ai_workflows: 5, regular_workflows: 20, ai_run: 300, regular_run: 3000, telegram_triggers: 1, history_days: 14, ai_chat: 100 };
+const LIMITS = { ai_workflows: 5, regular_workflows: 20, ai_run: 50, regular_run: 3000, telegram_triggers: 1, history_days: 14, ai_chat: 25 };
 const plan = (code: string, name: string, month: number, year: number) => ({
     code, name, description: `${name} — описание`, currency: "RUB", price_month: month, price_year: year,
     features: [`Возможность тарифа ${name}`], sort_order: 0, is_public: true, limits: LIMITS,

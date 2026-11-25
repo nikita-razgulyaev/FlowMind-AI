@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CheckCircle2, ChevronDown, Loader2, Trash2, X, XCircle } from "lucide-react";
 import {
     buildLines,
@@ -16,6 +16,9 @@ interface Props {
 }
 
 const MAX_SHOWN = 30;
+const MIN_HEIGHT = 120;
+const MAX_HEIGHT = 560;
+const DEFAULT_HEIGHT = 288; // ~max-h-72
 
 const TONE_STYLES: Record<string, string> = {
     user: "text-gray-500",
@@ -33,7 +36,9 @@ const STATUS_ICON: Record<string, { icon: typeof CheckCircle2; color: string }> 
 
 export default function ChatLogPanel({ executions, focusId, onClear, onClose }: Props) {
     const [openId, setOpenId] = useState<number | null>(null);
+    const [height, setHeight] = useState(DEFAULT_HEIGHT);
     const focusRef = useRef<HTMLDivElement>(null);
+    const dragRef = useRef<{ startY: number; startH: number } | null>(null);
 
     // раскрываем запрошенный запуск, иначе самый свежий
     useEffect(() => {
@@ -44,8 +49,50 @@ export default function ChatLogPanel({ executions, focusId, onClear, onClose }: 
         if (focusId && openId === focusId) focusRef.current?.scrollIntoView({ block: "nearest" });
     }, [focusId, openId, executions.length]);
 
+    const onPointerMove = useCallback((e: PointerEvent) => {
+        const drag = dragRef.current;
+        if (!drag) return;
+        // Тянем верхний край вверх → панель выше (deltaY отрицательный)
+        const next = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, drag.startH + (drag.startY - e.clientY)));
+        setHeight(next);
+    }, []);
+
+    const onPointerUp = useCallback(() => {
+        dragRef.current = null;
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        window.removeEventListener("pointermove", onPointerMove);
+        window.removeEventListener("pointerup", onPointerUp);
+    }, [onPointerMove]);
+
+    const onResizeStart = (e: React.PointerEvent) => {
+        e.preventDefault();
+        dragRef.current = { startY: e.clientY, startH: height };
+        document.body.style.cursor = "ns-resize";
+        document.body.style.userSelect = "none";
+        window.addEventListener("pointermove", onPointerMove);
+        window.addEventListener("pointerup", onPointerUp);
+    };
+
+    useEffect(() => () => {
+        window.removeEventListener("pointermove", onPointerMove);
+        window.removeEventListener("pointerup", onPointerUp);
+    }, [onPointerMove, onPointerUp]);
+
     return (
-        <div className="border-t border-gray-200 bg-white max-h-72 overflow-y-auto">
+        <div
+            className="relative border-t border-gray-200 bg-white overflow-y-auto"
+            style={{ height }}
+        >
+            {/* Зона захвата для изменения высоты */}
+            <div
+                onPointerDown={onResizeStart}
+                className="absolute inset-x-0 top-0 z-20 h-2 cursor-ns-resize group"
+                title="Потяните, чтобы изменить высоту журнала"
+            >
+                <div className="mx-auto mt-0.5 h-1 w-10 rounded-full bg-gray-200 opacity-0 transition-opacity group-hover:opacity-100" />
+            </div>
+
             <div className="flex items-center justify-between px-4 py-2 sticky top-0 z-10 bg-white border-b border-gray-100">
                 <span className="text-xs font-semibold text-gray-500">
                     Чат-лог выполнения

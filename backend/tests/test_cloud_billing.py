@@ -3,9 +3,13 @@ from datetime import timedelta
 import pytest
 
 from app.models import utcnow
+from app.plans_config import PLANS, YEAR_DISCOUNT_PERCENT, year_price_rub
 from tests.conftest import TEST_MODE, register, run, simple_workflow
 
 pytestmark = pytest.mark.skipif(TEST_MODE != "cloud", reason="cloud only")
+
+PRO_M = PLANS["pro"]["price_month_rub"] * 100          # цены в копейках, из plans_config.py
+BIZ_M = PLANS["business"]["price_month_rub"] * 100
 
 GOOD = {"number": "4242 4242 4242 4242", "exp_month": 12, "exp_year": 2035, "cvc": "123", "holder": "TEST USER"}
 
@@ -22,10 +26,11 @@ def test_plans_public(client):
     plans = client.get("/api/plans").json()
     assert [p["code"] for p in plans] == ["free", "pro", "business"]
     by = {p["code"]: p for p in plans}
-    assert by["pro"]["price_month"] == 99000 and by["pro"]["price_year"] == 950400
-    assert by["business"]["price_month"] == 299000 and by["business"]["price_year"] == 2870400
-    for code in ("pro", "business"):                    # годовая цена = 12 месяцев со скидкой 20%
-        assert by[code]["price_year"] == by[code]["price_month"] * 12 * 80 // 100
+    for code, spec in PLANS.items():
+        assert by[code]["price_month"] == spec["price_month_rub"] * 100
+        assert by[code]["price_year"] == year_price_rub(spec["price_month_rub"]) * 100
+    for code in ("pro", "business"):                    # годовая цена = 12 месяцев со скидкой
+        assert by[code]["price_year"] == by[code]["price_month"] * 12 * (100 - YEAR_DISCOUNT_PERCENT) // 100
 
 
 def test_successful_payment_activates_plan(client):
@@ -38,7 +43,7 @@ def test_successful_payment_activates_plan(client):
     start, end = (me["subscription"][k] for k in ("current_period_start", "current_period_end"))
     assert 28 <= (_dt(end) - _dt(start)).days <= 31
     pays = s.get("/billing/payments").json()
-    assert pays[0]["amount"] == 99000 and pays[0]["status"] == "succeeded"
+    assert pays[0]["amount"] == PRO_M and pays[0]["status"] == "succeeded"
     # повторная оплата того же платежа невозможна
     assert s.post(f"/billing/mock/{pays[0]['id']}/pay", json=GOOD).status_code == 400
 
@@ -100,8 +105,8 @@ def test_upgrade_with_proration_and_scheduled_downgrade(client):
     s = register(client)
     pay(s, "pro", "month")
     q = s.post("/billing/quote", json={"plan_code": "business", "period": "month"}).json()
-    assert q["action"] == "pay" and q["kind"] == "upgrade" and q["price"] == 299000
-    assert 90000 <= q["credit"] <= 99000 and q["amount"] == q["price"] - q["credit"]
+    assert q["action"] == "pay" and q["kind"] == "upgrade" and q["price"] == BIZ_M
+    assert 0.9 * PRO_M <= q["credit"] <= PRO_M and q["amount"] == q["price"] - q["credit"]
     r = pay(s, "business", "month")
     assert r.json()["amount"] == q["amount"] or abs(r.json()["amount"] - q["amount"]) < 200
     assert s.get("/me").json()["plan"]["code"] == "business"
@@ -148,7 +153,7 @@ def test_scheduled_downgrade_applies_at_renewal(client):
     assert s.post("/billing/demo/renew-now").json()["outcome"] == {"renewed": 1}
     me = s.get("/me").json()
     assert me["plan"]["code"] == "pro" and me["subscription"]["pending_plan_code"] is None
-    assert s.get("/billing/payments").json()[0]["amount"] == 99000       # списали цену нового тарифа
+    assert s.get("/billing/payments").json()[0]["amount"] == PRO_M       # списали цену нового тарифа
 
 
 def test_failed_renewal_grace_then_downgrade(client):
@@ -166,7 +171,7 @@ def test_failed_renewal_grace_then_downgrade(client):
 def test_plan_limits_follow_subscription(client):
     s = register(client)
     pay(s)
-    assert s.get("/me").json()["plan"]["limits"]["ai_workflows"] == 25
+    assert s.get("/me").json()["plan"]["limits"]["ai_workflows"] == PLANS["pro"]["max_ai_workflows"]
     pay_b = s.post("/billing/checkout", json={"plan_code": "business", "period": "year"}).json()["payment"]
     s.post(f"/billing/mock/{pay_b['id']}/pay", json=GOOD)
     assert s.get("/me").json()["plan"]["limits"]["regular_workflows"] is None   # без ограничений

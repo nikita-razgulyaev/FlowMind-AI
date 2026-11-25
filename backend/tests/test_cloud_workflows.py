@@ -1,6 +1,7 @@
 import pytest
 from sqlalchemy import select
 
+from app.plans_config import AI_DAILY_CAP, PLANS
 from tests.conftest import (TEST_MODE, ai_workflow, register, run, simple_workflow)
 
 pytestmark = pytest.mark.skipif(TEST_MODE != "cloud", reason="cloud only")
@@ -66,15 +67,16 @@ def test_http_node_blocks_internal_network(client):
 
 def test_free_plan_workflow_limits(client):
     s = register(client)
-    for i in range(5):
+    free = PLANS["free"]
+    for i in range(free["max_ai_workflows"]):
         assert s.post("/workflows/", json=ai_workflow(f"ai{i}")).status_code == 200
-    r = s.post("/workflows/", json=ai_workflow("ai6"))
+    r = s.post("/workflows/", json=ai_workflow("ai_over"))
     assert r.status_code == 402 and r.json()["detail"]["code"] == "quota_exceeded" and r.json()["detail"]["kind"] == "ai_workflows"
-    for i in range(20):
+    for i in range(free["max_regular_workflows"]):
         assert s.post("/workflows/", json=simple_workflow(f"r{i}")).status_code == 200
-    assert s.post("/workflows/", json=simple_workflow("r21")).status_code == 402
+    assert s.post("/workflows/", json=simple_workflow("r_over")).status_code == 402
     usage = s.get("/me").json()["workflows"]
-    assert usage["ai_workflows"] == 5 and usage["regular_workflows"] == 20
+    assert usage["ai_workflows"] == free["max_ai_workflows"] and usage["regular_workflows"] == free["max_regular_workflows"]
 
 
 def test_editing_existing_workflow_never_blocked_by_limit(client, admin):
@@ -86,7 +88,7 @@ def test_editing_existing_workflow_never_blocked_by_limit(client, admin):
         assert s.put(f"/workflows/{wf['id']}", json=body).status_code == 200
         assert s.post("/workflows/", json=simple_workflow("new")).status_code == 402
     finally:
-        admin.put("/admin/plans/free", json={"limits": {"regular_workflows": 20}})
+        admin.put("/admin/plans/free", json={"limits": {"regular_workflows": PLANS["free"]["max_regular_workflows"]}})
 
 
 def test_run_quota_and_counters(client, admin):
@@ -100,7 +102,7 @@ def test_run_quota_and_counters(client, admin):
         assert r.status_code == 402 and r.json()["detail"]["kind"] == "regular_run"
         assert s.get("/me").json()["usage"]["regular_run"] == 2
     finally:
-        admin.put("/admin/plans/free", json={"limits": {"regular_run": 3000}})
+        admin.put("/admin/plans/free", json={"limits": {"regular_run": PLANS["free"]["regular_runs_month"]}})
 
 
 def test_ai_workflow_uses_platform_key_and_guard(client, admin, fake_net):
@@ -128,7 +130,7 @@ def test_ai_workflow_uses_platform_key_and_guard(client, admin, fake_net):
     try:
         assert "Суточный лимит" in s.post(f"/workflows/{wid}/execute", json={}).json()["result"]["l"]
     finally:
-        admin.put("/admin/settings", json={"ai_daily_cap": 5000})
+        admin.put("/admin/settings", json={"ai_daily_cap": AI_DAILY_CAP})
 
 
 def test_local_mode_unavailable_in_cloud(client):

@@ -3,14 +3,11 @@ import type { ReactElement } from "react";
 import {
     Check,
     GraduationCap,
+    Library,
     CreditCard,
-    Info,
-    LogOut,
     Play,
     Save,
-    Settings,
     Terminal,
-    UserCircle,
 } from "lucide-react";
 import { NODE_META } from "../canvas/CanvasNode";
 import { NODE_INFO, PALETTE_TABS } from "../../utils/glossary";
@@ -359,22 +356,22 @@ export function RunIllustration({ animate = true }: { animate?: boolean }) {
 
 /** Слайд 6: нижняя часть боковой панели с выделенной кнопкой «Обучение», как на сайте. */
 export function SidebarIllustration() {
-    const rest = [CreditCard, Info, UserCircle, Settings, LogOut];
     return (
         <div
             className={`flex items-start gap-4 px-4 pt-6 pb-8 ${FRAME}`}
             role="img"
-            aria-label="Кнопка «Обучение» в боковой панели слева"
+            aria-label="Кнопки «Обучение» и «Документация» в боковой панели слева"
         >
-            <div className="flex w-11 shrink-0 flex-col items-center gap-4 rounded-t-lg border border-b-0 border-gray-200 bg-white py-3">
-                <span className="rounded-lg bg-blue-50 p-1.5 text-blue-600 ring-2 ring-blue-300">
+            <div className="flex w-11 shrink-0 flex-col items-center gap-4 border-r border-gray-200 bg-white py-3">
+                <span className="rounded-lg bg-blue-50 p-1.5 text-blue-600">
                     <GraduationCap className="h-[18px] w-[18px]" />
                 </span>
-                {rest.map((Icon, i) => (
-                    <span key={i} className="p-1.5 text-gray-400">
-                        <Icon className="h-[18px] w-[18px]" />
-                    </span>
-                ))}
+                <span className="p-1.5 text-gray-400" title="Документация">
+                    <Library className="h-[18px] w-[18px]" />
+                </span>
+                <span className="p-1.5 text-gray-400">
+                    <CreditCard className="h-[18px] w-[18px]" />
+                </span>
             </div>
             <div
                 className="mt-[18px] flex items-center gap-2"

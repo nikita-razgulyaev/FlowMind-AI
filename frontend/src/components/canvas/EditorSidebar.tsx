@@ -1,10 +1,9 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useState, type ReactNode, type MouseEvent } from "react";
-import { GraduationCap, Library, Workflow, History, FileText, Plug, Settings, UserCircle, ShieldCheck, LogOut, CreditCard, Info, MessageSquare } from "lucide-react";
+import { GraduationCap, Library, Workflow, History, FileText, Plug, Settings, UserCircle, ShieldCheck, LogOut, CreditCard, Info } from "lucide-react";
 import { useAuth } from "../../store/auth";
 import TutorialModal from "../tutorial/TutorialModal";
 import ConfirmDialog from "../ConfirmDialog";
-import FeedbackModal from "../feedback/FeedbackModal";
 
 const ITEMS: { to: string; icon: typeof Workflow; title: string }[] = [
     { to: "/", icon: Workflow, title: "Мои сценарии" },
@@ -28,7 +27,6 @@ export default function EditorSidebar({ onLeaveRequest }: Props = {}) {
     const { config, me, logout } = useAuth();
     const [logoutOpen, setLogoutOpen] = useState(false);
     const [tutorialOpen, setTutorialOpen] = useState(false);
-    const [feedbackOpen, setFeedbackOpen] = useState(false);
     const showAccount = !!config?.auth_required;
     const isAdmin = me?.user.role === "admin" && showAccount;
 
@@ -91,11 +89,6 @@ export default function EditorSidebar({ onLeaveRequest }: Props = {}) {
             >
                 <Library className="w-[18px] h-[18px]" />
             </a>
-            {config?.feedback_enabled && (
-                <button className={linkClass(false)} title="Обратная связь" aria-label="Обратная связь" onClick={() => setFeedbackOpen(true)}>
-                    <MessageSquare className="w-[18px] h-[18px]" />
-                </button>
-            )}
             {showAccount && (
                 <>
                     <GuardedLink to="/pricing" title="Тарифы" active={location.pathname === "/pricing"}>
@@ -140,7 +133,6 @@ export default function EditorSidebar({ onLeaveRequest }: Props = {}) {
                     navigate("/");
                 }}
             />
-            <FeedbackModal open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
             <TutorialModal
                 open={tutorialOpen}
                 mode="tour"

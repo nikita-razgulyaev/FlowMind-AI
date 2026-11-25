@@ -269,7 +269,6 @@ export default function WorkflowEditor() {
     };
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
-    const [runStatus, setRunStatus] = useState<string | null>(null);
     const [runProgress, setRunProgress] = useState<Record<string, NodeRunState> | null>(null);
     const [isRunning, setIsRunning] = useState(false);
     const [runFinished, setRunFinished] = useState(false);
@@ -323,7 +322,6 @@ export default function WorkflowEditor() {
         }
         setExecutions([]);
         setFocusExecutionId(null);
-        setRunStatus(null);
     };
 
     const loadWorkflow = async () => {
@@ -614,7 +612,6 @@ export default function WorkflowEditor() {
     const startPolling = (executionId: number) => {
         clearTimeout(pollTimer.current);
         setRunningExecutionId(executionId);
-        setRunStatus("Выполняется...");
         setRunFinished(false);
         setIsRunning(true);
 
@@ -622,11 +619,6 @@ export default function WorkflowEditor() {
             const { data: progress } = await api.getExecutionProgress(executionId);
             if (progress) setRunProgress(progress.nodes as Record<string, NodeRunState>);
             if (progress && progress.status !== "running") {
-                setRunStatus(
-                    progress.status === "cancelled"
-                        ? `Остановлено — запуск №${executionId}`
-                        : `Запуск №${executionId} завершён: ${progress.status === "success" ? "успешно" : "с ошибкой"}`,
-                );
                 setRunFinished(true);
                 setIsRunning(false);
                 setRunningExecutionId(null);
@@ -637,7 +629,6 @@ export default function WorkflowEditor() {
                 return;
             }
             if (attempt > 600) {   // ~5 минут без завершения — перестаём ждать, запуск продолжится на сервере
-                setRunStatus("Запуск продолжается на сервере — результат появится в истории запусков");
                 setIsRunning(false);
                 setRunningExecutionId(null);
                 return;
@@ -658,7 +649,6 @@ export default function WorkflowEditor() {
         setRunProgress({});
         const { data, error } = await api.executeWorkflowAsync(Number(id), { input: "" });
         if (error || !data) {
-            setRunStatus(`Ошибка: ${error}`);
             setRunProgress(null);
             return;
         }
@@ -683,7 +673,6 @@ export default function WorkflowEditor() {
             if (error) alert(`Error: ${error}`);
             else if (data) {
                 setIsActive(data.is_active);
-                setRunStatus(null);
             }
         }
         setIsToggling(false);
@@ -710,11 +699,6 @@ export default function WorkflowEditor() {
                         </button>
                     </div>
                     <div className="flex items-center gap-3">
-                        {runStatus && (
-                            <span className="text-xs text-gray-500 bg-gray-100 px-2.5 py-1 rounded-full">
-                                {runStatus}
-                            </span>
-                        )}
                         {hasListener && (
                             <span
                                 className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${

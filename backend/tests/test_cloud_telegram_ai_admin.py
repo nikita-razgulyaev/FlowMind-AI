@@ -3,6 +3,7 @@ import time
 
 import pytest
 
+from app.plans_config import PLANS
 from app.services import telegram_service as tg
 from tests.conftest import TEST_MODE, ai_workflow, register, run, simple_workflow
 
@@ -105,8 +106,9 @@ def test_telegram_filters_and_deactivation(client, fake_net):
 def test_telegram_trigger_quota_per_plan(client):
     s = register(client)
     cid = bot_connection(s)
-    assert s.post("/workflows/", json=telegram_workflow(cid, "one")).status_code == 200
-    r = s.post("/workflows/", json=telegram_workflow(cid, "two"))
+    for i in range(PLANS["free"]["telegram_triggers"]):
+        assert s.post("/workflows/", json=telegram_workflow(cid, f"tg{i}")).status_code == 200
+    r = s.post("/workflows/", json=telegram_workflow(cid, "over"))
     assert r.status_code == 402 and r.json()["detail"]["kind"] == "telegram_triggers"
     inactive = telegram_workflow(cid, "three")
     inactive["is_active"] = False
@@ -123,7 +125,7 @@ def test_telegram_run_limit_notifies_chat(client, fake_net, admin):
         assert wait_for(lambda: [p for m, p in fake_net.telegram_calls if m == "sendMessage"])
         assert "лимит" in [p for m, p in fake_net.telegram_calls if m == "sendMessage"][0]["text"].lower()
     finally:
-        admin.put("/admin/plans/free", json={"limits": {"regular_run": 3000}})
+        admin.put("/admin/plans/free", json={"limits": {"regular_run": PLANS["free"]["regular_runs_month"]}})
 
 
 def test_deleting_connection_removes_webhook(client, fake_net):
@@ -210,7 +212,7 @@ def test_ai_chat_quota_and_validation(client, fake_net, admin):
         assert r.status_code == 402 and r.json()["detail"]["kind"] == "ai_chat"
         assert s.get("/me").json()["usage"]["ai_chat"] == 2
     finally:
-        admin.put("/admin/plans/free", json={"limits": {"ai_chat": 100}})
+        admin.put("/admin/plans/free", json={"limits": {"ai_chat": PLANS["free"]["ai_chat_messages_month"]}})
 
 
 def test_ai_chat_unavailable_when_switched_off(client, admin):
@@ -264,7 +266,9 @@ def test_admin_edit_plan_and_stats(client, admin):
         assert admin.put("/admin/plans/pro", json={"limits": {"ai_run": -5}}).status_code == 400
         assert admin.put("/admin/plans/ghost", json={"name": "x"}).status_code == 404
     finally:
-        admin.put("/admin/plans/pro", json={"price_month": 99000, "limits": {"ai_workflows": 25, "ai_run": 3000}})
+        admin.put("/admin/plans/pro", json={"price_month": PLANS["pro"]["price_month_rub"] * 100,
+                                                  "limits": {"ai_workflows": PLANS["pro"]["max_ai_workflows"],
+                                                             "ai_run": PLANS["pro"]["ai_runs_month"]}})
 
     stats = admin.get("/admin/stats").json()
     assert stats["users_total"] >= 1 and len(stats["runs_by_day"]) == 14
